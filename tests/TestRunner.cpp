@@ -1,5 +1,6 @@
 #include "Common.h"
 #include "Core/PeReader.h"
+#include "Core/CryptoVerifier.h"
 #include "Core/InstructionScanner.h"
 #include "Core/StringScanner.h"
 #include "Core/ThreatAssessor.h"
@@ -348,6 +349,106 @@ void TestProcessInjectionChain() {
               << report.injectionChain.chainedApis.size() << ")\n";
 }
 
+void TestCryptoHashesAndImphash() {
+    std::cout << "[TEST] Running Crypto Hashes & Imphash verification tests...\n";
+
+    const uint8_t sampleData[] = "Koltzi Standalone Portable PE Malware Triage Agent 2026";
+    TriageReport report;
+    std::vector<ImportEntry> testImports = {
+        { "KERNEL32.dll", { "CreateFileW", "CloseHandle" } },
+        { "USER32.dll", { "MessageBoxW" } }
+    };
+
+    bool ok = CryptoVerifier::ComputeHashes(sampleData, sizeof(sampleData) - 1, testImports, report);
+    TEST_ASSERT(ok);
+    TEST_ASSERT(report.md5.length() == 32);
+    TEST_ASSERT(report.sha1.length() == 40);
+    TEST_ASSERT(report.sha256.length() == 64);
+    TEST_ASSERT(report.imphash.length() == 32);
+    TEST_ASSERT(!report.logEntries.empty());
+
+    std::cout << "  [PASS] MD5:    " << report.md5 << "\n";
+    std::cout << "  [PASS] SHA-1:  " << report.sha1 << "\n";
+    std::cout << "  [PASS] SHA-256:" << report.sha256 << "\n";
+    std::cout << "  [PASS] Imphash:" << report.imphash << "\n";
+}
+
+void TestBrowserContextAndFalsePositiveSuppression() {
+    std::cout << "[TEST] Running Browser False-Positive Disambiguation tests...\n";
+
+    // 1. Synthesize a binary that mimics a modern browser binary:
+    // It has normal imports (KERNEL32, USER32)
+    // It contains CRT startup PEB read (GS:[0x60])
+    // It contains internal profile path "\\Login Data"
+    // And it has a verified Authenticode signature from "Mozilla Corporation"
+    const uint8_t code[] = {
+        0x48, 0x83, 0xEC, 0x28,                               // sub rsp, 28h
+        0x65, 0x48, 0x8B, 0x04, 0x25, 0x60, 0x00, 0x00, 0x00, // mov rax, gs:[60h] (benign CRT startup)
+        0x48, 0x83, 0xC4, 0x28,                               // add rsp, 28h
+        0xC3                                                  // ret
+    };
+    std::vector<uint8_t> codeVec(std::begin(code), std::end(code));
+
+    std::string internalBrowserStrings = "Mozilla Firefox Nightly Internal Profile: \\Login Data and \\Cookies manager";
+    std::vector<uint8_t> dataVec(internalBrowserStrings.begin(), internalBrowserStrings.end());
+
+    auto peBytes = BuildTestPe64(codeVec, dataVec, "KERNEL32.dll", {
+        "CreateFileW", "ReadFile", "CloseHandle", "GetModuleHandleW",
+        "VirtualAlloc", "VirtualFree", "GetProcAddress", "LoadLibraryW",
+        "MultiByteToWideChar", "WideCharToMultiByte", "GetLastError"
+    });
+
+    PeReader pe;
+    bool ok = pe.OpenMemory(peBytes.data(), peBytes.size());
+    TEST_ASSERT(ok);
+
+    TriageReport report;
+    report.fileName = "firefox.exe";
+    report.machineType = pe.GetMachineString();
+    report.subsystem = pe.GetSubsystemString();
+    report.fileSize = pe.GetFileSize();
+    report.overallEntropy = pe.GetOverallEntropy();
+    report.sections = pe.GetSections();
+    report.imports = pe.GetImports();
+
+    // Simulate verified publisher signature
+    report.signature.isSigned = true;
+    report.signature.isValid = true;
+    report.signature.isTrustedVendor = true;
+    report.signature.signerSubject = "Mozilla Corporation";
+    report.signature.signerIssuer = "DigiCert Trusted G4 Code Signing";
+    report.signature.statusText = "Valid Authenticode Digital Signature";
+    report.isLegitimateBrowser = true;
+
+    InstructionScanner is;
+    is.Scan(pe, report);
+
+    // Verify CRT PEB access is recognized as benign
+    TEST_ASSERT(!report.pebAccesses.empty());
+    TEST_ASSERT(report.pebAccesses[0].isCrtTlsInit == true);
+
+    StringScanner ss;
+    ss.Scan(pe, report);
+
+    // Verify browser profile strings are contextually suppressed
+    for (const auto& str : report.sensitiveStrings) {
+        if (str.category == "Credential Scraping") {
+            TEST_ASSERT(str.isSuppressedByContext == true);
+        }
+    }
+
+    ThreatAssessor::Assess(pe, report);
+
+    // VERDICT MUST BE CLEAN / HAPPY!
+    TEST_ASSERT(report.threatLevel == ThreatLevel::Clean);
+    TEST_ASSERT(report.threatScore == 0);
+    TEST_ASSERT(report.mood == GhostMood::Happy);
+    TEST_ASSERT(report.personalityDialogue.find("Verified publisher") != std::string::npos);
+
+    std::cout << "  [PASS] Browser false-positive test passed: CLEAN / HAPPY (Threat Score: "
+              << report.threatScore << " / 100)\n";
+}
+
 int main(int argc, char* argv[]) {
     if (argc >= 2) {
         std::string pathStr = argv[1];
@@ -369,6 +470,9 @@ int main(int argc, char* argv[]) {
         r.overallEntropy = pe.GetOverallEntropy();
         r.sections = pe.GetSections();
         r.imports = pe.GetImports();
+
+        CryptoVerifier::ComputeHashes(pe.GetBaseAddress(), pe.GetFileSize(), r.imports, r);
+        CryptoVerifier::VerifyAuthenticode(wpath, pe.GetBaseAddress(), pe.GetFileSize(), r);
 
         InstructionScanner is;
         is.Scan(pe, r);
@@ -392,6 +496,20 @@ int main(int argc, char* argv[]) {
         std::cout << "Ghost Mood:       " << (r.mood == GhostMood::Alarmed ? "ALARMED" : r.mood == GhostMood::Puzzled ? "PUZZLED" : "HAPPY") << "\n";
         std::cout << "Mascot Dialogue:  \"" << r.personalityDialogue << "\"\n";
         std::cout << "--------------------------------------------------------\n";
+        std::cout << "Cryptographic Hashes:\n";
+        std::cout << "  MD5:            " << r.md5 << "\n";
+        std::cout << "  SHA-1:          " << r.sha1 << "\n";
+        std::cout << "  SHA-256:        " << r.sha256 << "\n";
+        std::cout << "  Imphash:        " << r.imphash << "\n";
+        std::cout << "--------------------------------------------------------\n";
+        std::cout << "Authenticode Signature:\n";
+        std::cout << "  Status:         " << r.signature.statusText << "\n";
+        if (r.signature.isSigned) {
+            std::cout << "  Subject:        " << r.signature.signerSubject << "\n";
+            std::cout << "  Issuer:         " << r.signature.signerIssuer << "\n";
+            std::cout << "  Trusted Vendor: " << (r.signature.isTrustedVendor ? "YES" : "NO") << "\n";
+        }
+        std::cout << "--------------------------------------------------------\n";
         std::cout << "Section Breakdown:\n";
         for (const auto& sec : r.sections) {
             std::cout << "  * " << sec.name << " (Raw: " << sec.rawSize << " bytes, Entropy: " << sec.entropy
@@ -412,6 +530,8 @@ int main(int argc, char* argv[]) {
 
     TestEntropyCalculation();
     TestCleanBinary();
+    TestCryptoHashesAndImphash();
+    TestBrowserContextAndFalsePositiveSuppression();
     TestDirectSyscallAndPebTraversal();
     TestPackedMummy();
     TestCredentialStealerStrings();

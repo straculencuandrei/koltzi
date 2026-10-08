@@ -65,6 +65,39 @@ bool StringScanner::Scan(const PeReader& pe, TriageReport& report) {
 
     std::unordered_set<std::string> seenPatterns;
 
+    // Determine if binary has legitimate browser identity or trusted publisher
+    bool isTrustedBrowserContext = report.isLegitimateBrowser ||
+        (report.signature.isValid && report.signature.isTrustedVendor);
+
+    auto ProcessMatch = [&](const TargetPattern& target, size_t startOffset, bool isUtf16) {
+        StringFinding sf;
+        sf.category = target.category;
+        sf.offset = startOffset;
+        sf.isUtf16 = isUtf16;
+
+        // Contextual disambiguation:
+        // Legitimate browsers contain internal references to their own profiles and storage paths.
+        // If the binary is verified as signed by a trusted vendor and is a browser component,
+        // suppress credential scraping alerts for database paths (unless exfil endpoints exist).
+        if (target.category == "Credential Scraping" && isTrustedBrowserContext) {
+            sf.isSuppressedByContext = true;
+            sf.matchedPattern = target.pattern + " (" + target.displayDescription + ") [Suppressed: Verified Publisher context]";
+            report.AddLog("STRINGS", "INFO", "Suppressed browser internal profile path for verified publisher: " + target.pattern);
+        } else {
+            sf.isSuppressedByContext = false;
+            sf.matchedPattern = target.pattern + " (" + target.displayDescription + ")";
+            if (target.category == "Exfiltration C2") {
+                report.AddLog("STRINGS", "CRIT", "C2 / Exfiltration endpoint string matched: " + target.pattern);
+            } else if (target.category == "Defense Evasion") {
+                report.AddLog("STRINGS", "CRIT", "Defense evasion command matched: " + target.pattern);
+            } else {
+                report.AddLog("STRINGS", "WARN", "Sensitive target string matched: " + target.pattern);
+            }
+        }
+
+        report.sensitiveStrings.push_back(std::move(sf));
+    };
+
     // Scan UTF-8 / ASCII strings
     {
         std::string currentStr;
@@ -81,12 +114,7 @@ bool StringScanner::Scan(const PeReader& pe, TriageReport& report) {
                         if (seenPatterns.find(target.pattern) == seenPatterns.end() &&
                             CaseInsensitiveContains(currentStr, target.pattern)) {
                             seenPatterns.insert(target.pattern);
-                            StringFinding sf;
-                            sf.category = target.category;
-                            sf.matchedPattern = target.pattern + " (" + target.displayDescription + ")";
-                            sf.offset = startOffset;
-                            sf.isUtf16 = false;
-                            report.sensitiveStrings.push_back(std::move(sf));
+                            ProcessMatch(target, startOffset, false);
                         }
                     }
                 }
@@ -113,12 +141,7 @@ bool StringScanner::Scan(const PeReader& pe, TriageReport& report) {
                         if (seenPatterns.find(target.pattern) == seenPatterns.end() &&
                             CaseInsensitiveContains(currentStr, target.pattern)) {
                             seenPatterns.insert(target.pattern);
-                            StringFinding sf;
-                            sf.category = target.category;
-                            sf.matchedPattern = target.pattern + " (" + target.displayDescription + ")";
-                            sf.offset = startOffset;
-                            sf.isUtf16 = true;
-                            report.sensitiveStrings.push_back(std::move(sf));
+                            ProcessMatch(target, startOffset, true);
                         }
                     }
                 }
@@ -126,6 +149,8 @@ bool StringScanner::Scan(const PeReader& pe, TriageReport& report) {
             }
         }
     }
+
+    report.AddLog("STRINGS", "PASS", "String inspection complete: " + std::to_string(report.sensitiveStrings.size()) + " signature patterns processed");
 
     return true;
 }

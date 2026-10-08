@@ -1,4 +1,5 @@
 #include "Application.h"
+#include "Core/CryptoVerifier.h"
 #include <iostream>
 #include <filesystem>
 #include <random>
@@ -127,6 +128,12 @@ void Application::TriageFileAsync(const std::wstring& filePath) {
             report->sections = pe.GetSections();
             report->imports = pe.GetImports();
 
+            // Compute MD5, SHA-1, SHA-256 and Imphash
+            CryptoVerifier::ComputeHashes(pe.GetBaseAddress(), pe.GetFileSize(), report->imports, *report);
+
+            // Verify Authenticode Digital Signature
+            CryptoVerifier::VerifyAuthenticode(filePath, pe.GetBaseAddress(), pe.GetFileSize(), *report);
+
             // Run Zydis instruction sweeper
             m_instructionScanner.Scan(pe, *report);
 
@@ -187,6 +194,8 @@ void Application::TriageMemoryAsync(const uint8_t* data, size_t size, const std:
             report->sections = pe.GetSections();
             report->imports = pe.GetImports();
 
+            CryptoVerifier::ComputeHashes(pe.GetBaseAddress(), pe.GetFileSize(), report->imports, *report);
+            CryptoVerifier::VerifyAuthenticode(L"", pe.GetBaseAddress(), pe.GetFileSize(), *report);
             m_instructionScanner.Scan(pe, *report);
             m_stringScanner.Scan(pe, *report);
             ThreatAssessor::Assess(pe, *report);
@@ -235,6 +244,8 @@ bool Application::TriageFileCli(const std::wstring& filePath) {
     report.sections = pe.GetSections();
     report.imports = pe.GetImports();
 
+    CryptoVerifier::ComputeHashes(pe.GetBaseAddress(), pe.GetFileSize(), report.imports, report);
+    CryptoVerifier::VerifyAuthenticode(filePath, pe.GetBaseAddress(), pe.GetFileSize(), report);
     m_instructionScanner.Scan(pe, report);
     m_stringScanner.Scan(pe, report);
     ThreatAssessor::Assess(pe, report);
@@ -252,8 +263,22 @@ bool Application::TriageFileCli(const std::wstring& filePath) {
     ss << "Overall Entropy: " << std::fixed << std::setprecision(2) << report.overallEntropy << " / 8.00\n";
     ss << "Latency:         " << report.analysisTimeMs << " ms\n";
     ss << "Threat Score:    " << report.threatScore << " / 100\n";
-    ss << "Threat Level:    " << (report.threatScore >= 60 ? "MALICIOUS" : report.threatScore >= 30 ? "SUSPICIOUS" : "CLEAN") << "\n";
+    ss << "Threat Level:    " << (report.threatScore >= 60 ? "MALICIOUS" : report.threatScore >= 20 ? "SUSPICIOUS" : "CLEAN") << "\n";
     ss << "Dialogue:        \"" << report.personalityDialogue << "\"\n";
+    ss << "--------------------------------------------------------\n";
+    ss << "Cryptographic Hashes:\n";
+    ss << "  MD5:           " << report.md5 << "\n";
+    ss << "  SHA-1:         " << report.sha1 << "\n";
+    ss << "  SHA-256:       " << report.sha256 << "\n";
+    ss << "  Imphash:       " << (report.imphash.empty() ? "N/A" : report.imphash) << "\n";
+    ss << "--------------------------------------------------------\n";
+    ss << "Authenticode Signature:\n";
+    ss << "  Status:        " << report.signature.statusText << "\n";
+    if (report.signature.isSigned) {
+        ss << "  Subject:       " << report.signature.signerSubject << "\n";
+        ss << "  Issuer:        " << report.signature.signerIssuer << "\n";
+        ss << "  Trusted Vendor:" << (report.signature.isTrustedVendor ? " YES" : " NO") << "\n";
+    }
     ss << "--------------------------------------------------------\n";
     ss << "Technical Findings:\n";
     for (const auto& line : report.technicalDetails) {
@@ -262,7 +287,8 @@ bool Application::TriageFileCli(const std::wstring& filePath) {
     if (!report.syscalls.empty()) {
         ss << "Direct Syscalls (" << report.syscalls.size() << "):\n";
         for (const auto& sc : report.syscalls) {
-            ss << "    [0x" << std::hex << sc.rva << std::dec << "] " << sc.disassembly << " (" << sc.instructionHex << ")\n";
+            ss << "    [0x" << std::hex << sc.rva << std::dec << "] " << sc.disassembly << " (" << sc.instructionHex << ")"
+               << (sc.isLegitimateJitOrHook ? " [JIT/Sandbox]" : "") << "\n";
         }
     }
     if (!report.pebAccesses.empty()) {
@@ -276,6 +302,14 @@ bool Application::TriageFileCli(const std::wstring& filePath) {
         for (const auto& str : report.sensitiveStrings) {
             ss << "    [" << str.category << "] " << str.matchedPattern << "\n";
         }
+    }
+    ss << "--------------------------------------------------------\n";
+    ss << "Reverse Engineering Audit Log Trail (" << report.logEntries.size() << " entries):\n";
+    for (const auto& entry : report.logEntries) {
+        ss << "  " << std::setw(10) << std::left << entry.timestamp
+           << " [" << std::setw(7) << std::left << entry.subsystem << "] "
+           << "[" << std::setw(5) << std::left << entry.level << "] "
+           << entry.message << "\n";
     }
     ss << "========================================================\n";
     PrintToConsole(ss.str());
@@ -295,40 +329,50 @@ int Application::Run(int argc, wchar_t* argv[]) {
             {
                 PeReader pe; pe.OpenMemory(cleanBuf.data(), cleanBuf.size(), L"clean.exe");
                 TriageReport r; r.fileName = "Clean_Binary.exe"; r.machineType = pe.GetMachineString(); r.subsystem = pe.GetSubsystemString(); r.fileSize = pe.GetFileSize(); r.overallEntropy = pe.GetOverallEntropy(); r.sections = pe.GetSections(); r.imports = pe.GetImports();
+                CryptoVerifier::ComputeHashes(pe.GetBaseAddress(), pe.GetFileSize(), r.imports, r);
+                CryptoVerifier::VerifyAuthenticode(L"", pe.GetBaseAddress(), pe.GetFileSize(), r);
                 m_instructionScanner.Scan(pe, r); m_stringScanner.Scan(pe, r); ThreatAssessor::Assess(pe, r);
-                PrintToConsole(std::format("Score: {} | Threat: {} | Dialogue: \"{}\"\n", r.threatScore, (int)r.threatLevel, r.personalityDialogue));
+                PrintToConsole(std::format("Score: {} | Threat: {} | Dialogue: \"{}\" | SHA256: {}\n", r.threatScore, (int)r.threatLevel, r.personalityDialogue, r.sha256.substr(0, 16) + "..."));
             }
             auto packedBuf = GeneratePackedSample();
             PrintToConsole("\n>>> 2. Testing Packed Mummy:\n");
             {
                 PeReader pe; pe.OpenMemory(packedBuf.data(), packedBuf.size(), L"packed.exe");
                 TriageReport r; r.fileName = "Packed_Binary.exe"; r.machineType = pe.GetMachineString(); r.subsystem = pe.GetSubsystemString(); r.fileSize = pe.GetFileSize(); r.overallEntropy = pe.GetOverallEntropy(); r.sections = pe.GetSections(); r.imports = pe.GetImports();
+                CryptoVerifier::ComputeHashes(pe.GetBaseAddress(), pe.GetFileSize(), r.imports, r);
+                CryptoVerifier::VerifyAuthenticode(L"", pe.GetBaseAddress(), pe.GetFileSize(), r);
                 m_instructionScanner.Scan(pe, r); m_stringScanner.Scan(pe, r); ThreatAssessor::Assess(pe, r);
-                PrintToConsole(std::format("Score: {} | Threat: {} | Dialogue: \"{}\"\n", r.threatScore, (int)r.threatLevel, r.personalityDialogue));
+                PrintToConsole(std::format("Score: {} | Threat: {} | Dialogue: \"{}\" | SHA256: {}\n", r.threatScore, (int)r.threatLevel, r.personalityDialogue, r.sha256.substr(0, 16) + "..."));
             }
             auto syscallBuf = GenerateSyscallPebSample();
             PrintToConsole("\n>>> 3. Testing Direct Syscalls + PEB Hashing:\n");
             {
                 PeReader pe; pe.OpenMemory(syscallBuf.data(), syscallBuf.size(), L"syscall.exe");
                 TriageReport r; r.fileName = "Syscall_Binary.exe"; r.machineType = pe.GetMachineString(); r.subsystem = pe.GetSubsystemString(); r.fileSize = pe.GetFileSize(); r.overallEntropy = pe.GetOverallEntropy(); r.sections = pe.GetSections(); r.imports = pe.GetImports();
+                CryptoVerifier::ComputeHashes(pe.GetBaseAddress(), pe.GetFileSize(), r.imports, r);
+                CryptoVerifier::VerifyAuthenticode(L"", pe.GetBaseAddress(), pe.GetFileSize(), r);
                 m_instructionScanner.Scan(pe, r); m_stringScanner.Scan(pe, r); ThreatAssessor::Assess(pe, r);
-                PrintToConsole(std::format("Score: {} | Threat: {} | Dialogue: \"{}\"\n", r.threatScore, (int)r.threatLevel, r.personalityDialogue));
+                PrintToConsole(std::format("Score: {} | Threat: {} | Dialogue: \"{}\" | SHA256: {}\n", r.threatScore, (int)r.threatLevel, r.personalityDialogue, r.sha256.substr(0, 16) + "..."));
             }
             auto credBuf = GenerateCredStealerSample();
             PrintToConsole("\n>>> 4. Testing Credential Stealer:\n");
             {
                 PeReader pe; pe.OpenMemory(credBuf.data(), credBuf.size(), L"stealer.exe");
                 TriageReport r; r.fileName = "Stealer_Binary.exe"; r.machineType = pe.GetMachineString(); r.subsystem = pe.GetSubsystemString(); r.fileSize = pe.GetFileSize(); r.overallEntropy = pe.GetOverallEntropy(); r.sections = pe.GetSections(); r.imports = pe.GetImports();
+                CryptoVerifier::ComputeHashes(pe.GetBaseAddress(), pe.GetFileSize(), r.imports, r);
+                CryptoVerifier::VerifyAuthenticode(L"", pe.GetBaseAddress(), pe.GetFileSize(), r);
                 m_instructionScanner.Scan(pe, r); m_stringScanner.Scan(pe, r); ThreatAssessor::Assess(pe, r);
-                PrintToConsole(std::format("Score: {} | Threat: {} | Dialogue: \"{}\"\n", r.threatScore, (int)r.threatLevel, r.personalityDialogue));
+                PrintToConsole(std::format("Score: {} | Threat: {} | Dialogue: \"{}\" | SHA256: {}\n", r.threatScore, (int)r.threatLevel, r.personalityDialogue, r.sha256.substr(0, 16) + "..."));
             }
             auto injBuf = GenerateInjectionSample();
             PrintToConsole("\n>>> 5. Testing Process Injection Chain:\n");
             {
                 PeReader pe; pe.OpenMemory(injBuf.data(), injBuf.size(), L"injection.exe");
                 TriageReport r; r.fileName = "Injection_Binary.exe"; r.machineType = pe.GetMachineString(); r.subsystem = pe.GetSubsystemString(); r.fileSize = pe.GetFileSize(); r.overallEntropy = pe.GetOverallEntropy(); r.sections = pe.GetSections(); r.imports = pe.GetImports();
+                CryptoVerifier::ComputeHashes(pe.GetBaseAddress(), pe.GetFileSize(), r.imports, r);
+                CryptoVerifier::VerifyAuthenticode(L"", pe.GetBaseAddress(), pe.GetFileSize(), r);
                 m_instructionScanner.Scan(pe, r); m_stringScanner.Scan(pe, r); ThreatAssessor::Assess(pe, r);
-                PrintToConsole(std::format("Score: {} | Threat: {} | Dialogue: \"{}\"\n", r.threatScore, (int)r.threatLevel, r.personalityDialogue));
+                PrintToConsole(std::format("Score: {} | Threat: {} | Dialogue: \"{}\" | SHA256: {}\n", r.threatScore, (int)r.threatLevel, r.personalityDialogue, r.sha256.substr(0, 16) + "..."));
             }
             PrintToConsole("\n[Koltzi] All 5 profiles validated successfully!\n");
             return 0;

@@ -27,25 +27,31 @@ The application couples two layers:
 
 ```
 Koltzi/
-├── CMakeLists.txt              # CMake configuration with static CRT (/MT) & Zydis FetchContent
+├── CMakeLists.txt              # CMake configuration with static CRT (/MT), bcrypt, wintrust & Zydis
+├── FONT/                       # Creato Display font family (Thin to Black, SIL OFL 1.1)
+├── res/
+│   ├── resource.h              # Resource IDs for embedded Creato Display font weights
+│   └── Koltzi.rc               # RCDATA font resource script for single portable .exe
 ├── src/
 │   ├── Main.cpp                # WinMain entry point, Per-Monitor DPI V2 & COM initialization
-│   ├── Common.h                # System headers, string helpers, and Direct2D safe-release macros
+│   ├── Common.h                # System headers, string helpers, BCrypt/WinTrust headers & Direct2D macros
 │   ├── Core/
-│   │   ├── TriageReport.h      # Structured report models, threat scores, and finding types
+│   │   ├── TriageReport.h      # Structured report models, hashes, cert info, and audit log entries
 │   │   ├── PeReader.h/.cpp     # Zero-copy memory-mapped PE parser with 256-bin Shannon entropy
-│   │   ├── InstructionScanner  # Zydis-based linear sweeper (Syscalls, PEB, API Hashing, Injections)
-│   │   ├── StringScanner.h/.cpp# Targeted artifact extractor (DPAPI, Webhooks, Evasion commands)
-│   │   └── ThreatAssessor.h/.cpp# Scoring engine, mood transitions, and mascot dialogue matrix
+│   │   ├── CryptoVerifier.h/.cpp# Antivirus-grade MD5, SHA-1, SHA-256, Imphash, and Authenticode WinVerifyTrust
+│   │   ├── InstructionScanner  # Zydis linear sweeper with CRT TLS and crypto loop disambiguation
+│   │   ├── StringScanner.h/.cpp# Targeted artifact extractor with browser profile context suppression
+│   │   └── ThreatAssessor.h/.cpp# Correlated threat scoring, Authenticode trust discount & audit logging
 │   ├── UI/
 │   │   ├── AnimationTypes.h    # State machine (IDLE, SNIFFING, ALARMED, PUZZLED, HAPPY) & particles
+│   │   ├── FontManager.h/.cpp  # Embedded/disk Creato Display typography manager & DirectWrite formats
 │   │   ├── GhostRenderer.h/.cpp# Procedural Direct2D geometry, Bézier wave ripples, expressive eyes
 │   │   ├── SpeechBubble.h/.cpp # Glassmorphism speech card, typewriter effect, expandable HUD
-│   │   └── GhostWindow.h/.cpp  # Layered window (UpdateLayeredWindow), drag-and-drop, context menu
+│   │   └── GhostWindow.h/.cpp  # Resizable Win32 desktop window, dual-view dashboard & audit log
 │   └── App/
 │       ├── Application.h/.cpp  # Asynchronous worker thread (std::jthread) & sample generators
 └── tests/
-    └── TestRunner.cpp          # Automated test suite & command-line live file triage
+    └── TestRunner.cpp          # Automated test suite (8 tests) & command-line live file triage
 ```
 
 ---
@@ -53,9 +59,10 @@ Koltzi/
 ## 3. Triage Heuristics & Findings Matrix
 
 | Detection Rule | Technical Pattern | Mascot Emotion | Mascot Assessment |
-| :--- | :--- | :---: | :--- |
-| **Packed / Cryptic** | Section entropy $H > 7.20$ or total file entropy $> 7.80$ | `PUZZLED` | *"Whoa! This file is wrapped in thick encryption or packed like a mummy! I can't read the functions inside without running it. Be careful!"* |
-| **Direct Syscalls + PEB Hashing** | Raw `syscall` (`0F 05`), `sysenter` (`0F 34`), PEB access (`GS:[0x60]` / `FS:[0x30]`), ROR13 API hashing loop | `ALARMED` | *"Sneaky sneaky! It's bypassing standard Windows libraries using direct syscalls and hiding its imports with PEB memory hashing. It's trying to ghost the antivirus!"* |
+| :--- | :--- | :--- :--- | :--- |
+| **Verified Publisher** | Valid Authenticode digital signature by trusted vendor (Mozilla, Google, Microsoft, Apple, Valve, Brave) | `HAPPY` | *"Verified publisher! Digitally signed by [Vendor]. Standard imports and cryptographic routines verified with zero exfiltration indicators."* |
+| **Packed / Cryptic** | Section entropy $H > 7.20$ or total file entropy $> 7.80$ in executable code | `PUZZLED` | *"Whoa! This file is wrapped in thick encryption or packed like a mummy! I can't read the functions inside without running it. Be careful!"* |
+| **Direct Syscalls + PEB Hashing** | Raw `syscall` (`0F 05`), `sysenter` (`0F 34`), PEB Ldr walking (`GS:[0x60]` / `FS:[0x30]`), ROR13 API hashing loop with stripped IAT | `ALARMED` | *"Sneaky sneaky! It's bypassing standard Windows libraries using direct syscalls and hiding its imports with PEB memory hashing. It's trying to ghost the antivirus!"* |
 | **Credential Scraping** | Targeted DPAPI paths (`\Login Data`, `\Cookies`, `CryptUnprotectData`), Discord Webhooks, Telegram C2, Solana/MetaMask IDs | `ALARMED` | *"Red alert! Found hardcoded paths targeting your Chrome/Edge browser passwords and crypto wallets. Do NOT run this!"* |
 | **Process Injection** | Cross-process chaining: `VirtualAllocEx` (RWX) -> `WriteProcessMemory` -> `CreateRemoteThread` / `QueueUserAPC` | `ALARMED` | *"Yikes! It's asking Windows to carve out executable memory in another process and pull the trigger! Classic process injection!"* |
 | **Clean Binary** | Standard imports, legitimate section entropy, no evasion loops or stealer patterns | `HAPPY` | *"All clear! Normal imports, standard entropy, and no stealth injection loops. Looks like a friendly binary!"* |

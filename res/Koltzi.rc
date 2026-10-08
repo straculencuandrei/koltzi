@@ -1,0 +1,11 @@
+#include "resource.h"
+
+// Creato Display (SIL Open Font License 1.1) - embedded so Koltzi.exe stays a single standalone binary
+IDR_FONT_THIN          RCDATA "../FONT/creato_display/CreatoDisplay-Thin.otf"
+IDR_FONT_LIGHT         RCDATA "../FONT/creato_display/CreatoDisplay-Light.otf"
+IDR_FONT_REGULAR       RCDATA "../FONT/creato_display/CreatoDisplay-Regular.otf"
+IDR_FONT_REGULAR_ITAL  RCDATA "../FONT/creato_display/CreatoDisplay-RegularItalic.otf"
+IDR_FONT_MEDIUM        RCDATA "../FONT/creato_display/CreatoDisplay-Medium.otf"
+IDR_FONT_BOLD          RCDATA "../FONT/creato_display/CreatoDisplay-Bold.otf"
+IDR_FONT_EXTRABOLD     RCDATA "../FONT/creato_display/CreatoDisplay-ExtraBold.otf"
+IDR_FONT_BLACK         RCDATA "../FONT/creato_display/CreatoDisplay-Black.otf"

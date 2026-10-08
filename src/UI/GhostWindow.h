@@ -2,6 +2,7 @@
 #include "Common.h"
 #include "GhostRenderer.h"
 #include "SpeechBubble.h"
+#include "FontManager.h"
 #include "Core/TriageReport.h"
 #include <memory>
 #include <functional>
@@ -91,6 +92,7 @@ private:
 
     GhostRenderer m_ghostRenderer;
     SpeechBubble m_speechBubble;
+    FontManager m_fontManager;
 
     GhostMood m_currentMood = GhostMood::Idle;
     std::shared_ptr<TriageReport> m_currentReport;
@@ -99,6 +101,10 @@ private:
     int m_hoveredButton = -1;
     bool m_dropHover = false;
     D2D1_RECT_F m_dropZoneRect = { 0, 0, 0, 0 };
+
+    bool m_showAuditLog = false;
+    D2D1_RECT_F m_tabFindingsRect = { 0, 0, 0, 0 };
+    D2D1_RECT_F m_tabAuditRect = { 0, 0, 0, 0 };
 
     FileDropCallback m_onFileDrop;
     CommandCallback m_onCommand;

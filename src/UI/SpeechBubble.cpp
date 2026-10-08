@@ -11,7 +11,7 @@ SpeechBubble::~SpeechBubble() {
     DiscardDeviceResources();
 }
 
-HRESULT SpeechBubble::Initialize(ID2D1RenderTarget* rt, IDWriteFactory* dwriteFactory) {
+HRESULT SpeechBubble::Initialize(ID2D1RenderTarget* rt, IDWriteFactory* dwriteFactory, const std::wstring& fontFamily) {
     DiscardDeviceResources();
     m_dwriteFactory = dwriteFactory;
     rt->GetFactory(&m_d2dFactory);
@@ -34,30 +34,32 @@ HRESULT SpeechBubble::Initialize(ID2D1RenderTarget* rt, IDWriteFactory* dwriteFa
     if (FAILED(hr)) return hr;
 
     if (m_dwriteFactory) {
+        const wchar_t* family = fontFamily.empty() ? L"Segoe UI" : fontFamily.c_str();
+
         // Badge format
         m_dwriteFactory->CreateTextFormat(
-            L"Segoe UI", nullptr,
+            family, nullptr,
             DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
             10.5f, L"en-us", &m_badgeFormat
         );
 
         // Dialogue format
         m_dwriteFactory->CreateTextFormat(
-            L"Segoe UI", nullptr,
+            family, nullptr,
             DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
             13.5f, L"en-us", &m_dialogueFormat
         );
 
         // HUD Heading format
         m_dwriteFactory->CreateTextFormat(
-            L"Segoe UI", nullptr,
+            family, nullptr,
             DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
             12.0f, L"en-us", &m_hudHeadingFormat
         );
 
         // HUD Body format
         m_dwriteFactory->CreateTextFormat(
-            L"Segoe UI", nullptr,
+            family, nullptr,
             DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
             11.0f, L"en-us", &m_hudTextFormat
         );

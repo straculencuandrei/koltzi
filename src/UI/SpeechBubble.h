@@ -13,7 +13,7 @@ public:
     SpeechBubble();
     ~SpeechBubble();
 
-    HRESULT Initialize(ID2D1RenderTarget* rt, IDWriteFactory* dwriteFactory);
+    HRESULT Initialize(ID2D1RenderTarget* rt, IDWriteFactory* dwriteFactory, const std::wstring& fontFamily = L"Creato Display");
     void DiscardDeviceResources();
 
     void Update(float deltaSeconds);

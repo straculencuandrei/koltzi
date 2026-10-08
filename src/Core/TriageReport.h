@@ -29,7 +29,7 @@ struct SectionInfo {
     double entropy = 0.0;
     bool isExecutable = false;
     bool isWritable = false;
-    bool isSuspiciousEntropy = false; // > 7.2 for executable
+    bool isSuspiciousEntropy = false; // > 7.2 for executable code
     bool isRwx = false;               // Executable AND Writable (W^X violation)
 };
 
@@ -39,6 +39,7 @@ struct SyscallFinding {
     std::string mnemonic;
     std::string instructionHex;
     std::string disassembly;
+    bool isLegitimateJitOrHook = false;
 };
 
 struct PebAccessFinding {
@@ -48,6 +49,7 @@ struct PebAccessFinding {
     uint32_t offset = 0;     // 0x30 or 0x60
     std::string description;
     std::string disassembly;
+    bool isCrtTlsInit = false; // Normal CRT __security_init_cookie or TLS index read
 };
 
 struct ApiHashFinding {
@@ -55,6 +57,7 @@ struct ApiHashFinding {
     std::string section;
     std::string description;
     std::string disassembly;
+    bool isLikelyCryptoOrStringHash = false;
 };
 
 struct InjectionChainFinding {
@@ -71,11 +74,28 @@ struct StringFinding {
     std::string matchedPattern;
     uint64_t offset = 0;
     bool isUtf16 = false;
+    bool isSuppressedByContext = false; // e.g. legitimate browser profile wizard
 };
 
 struct ImportEntry {
     std::string dllName;
     std::vector<std::string> functions;
+};
+
+struct SignatureInfo {
+    bool isSigned = false;
+    bool isValid = false;
+    bool isTrustedVendor = false;
+    std::string signerSubject;
+    std::string signerIssuer;
+    std::string statusText = "Unsigned binary";
+};
+
+struct TriageLogEntry {
+    std::string timestamp; // e.g. "0.012 ms"
+    std::string level;     // "INFO", "WARN", "CRIT", "PASS", "AUDIT"
+    std::string subsystem; // "HASH", "CERT", "HEADER", "ZYDIS", "STRINGS", "ASSESS"
+    std::string message;
 };
 
 struct TriageReport {
@@ -92,6 +112,19 @@ struct TriageReport {
     uint32_t timestamp = 0;
     uint32_t entryPointRva = 0;
 
+    // Cryptographic Hashes (Standard AV / VirusTotal style)
+    std::string md5;
+    std::string sha1;
+    std::string sha256;
+    std::string imphash;
+
+    // Authenticode Digital Signature
+    SignatureInfo signature;
+
+    // Legitimate Browser / Software Identity
+    bool isLegitimateBrowser = false;
+    std::string browserIdentity;
+
     std::vector<SectionInfo> sections;
     std::vector<ImportEntry> imports;
     std::vector<SyscallFinding> syscalls;
@@ -99,6 +132,20 @@ struct TriageReport {
     std::vector<ApiHashFinding> apiHashLoops;
     InjectionChainFinding injectionChain;
     std::vector<StringFinding> sensitiveStrings;
+
+    // Detailed Audit & Triage Log
+    std::vector<TriageLogEntry> logEntries;
+
+    void AddLog(const std::string& subsystem, const std::string& level, const std::string& msg, double timeMs = 0.0) {
+        TriageLogEntry entry;
+        char timeBuf[32];
+        snprintf(timeBuf, sizeof(timeBuf), "+%.2fms", timeMs);
+        entry.timestamp = timeBuf;
+        entry.subsystem = subsystem;
+        entry.level = level;
+        entry.message = msg;
+        logEntries.push_back(std::move(entry));
+    }
 
     double analysisTimeMs = 0.0;
     int threatScore = 0; // 0 to 100

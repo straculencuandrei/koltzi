@@ -36,6 +36,11 @@
 #include <optional>
 #include <functional>
 
+#include <bcrypt.h>
+#include <wintrust.h>
+#include <softpub.h>
+#include <wincrypt.h>
+
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "dwrite.lib")
 #pragma comment(lib, "windowscodecs.lib")
@@ -46,6 +51,9 @@
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "comdlg32.lib")
+#pragma comment(lib, "bcrypt.lib")
+#pragma comment(lib, "wintrust.lib")
+#pragma comment(lib, "crypt32.lib")
 
 template <typename T>
 inline void SafeRelease(T*& p) {

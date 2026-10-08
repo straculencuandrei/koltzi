@@ -15,7 +15,8 @@ enum MenuCommands {
     IDM_SAMPLE_INJECTION = 2006,
     IDM_TOGGLE_HUD = 2007,
     IDM_RESET = 2008,
-    IDM_EXIT = 2009
+    IDM_EXIT = 2009,
+    IDM_TOGGLE_AUDIT = 2010
 };
 
 GhostWindow::GhostWindow() = default;
@@ -95,6 +96,7 @@ void GhostWindow::Destroy() {
     SafeRelease(m_codeFormat);
     SafeRelease(m_badgeFormat);
     SafeRelease(m_buttonFormat);
+    m_fontManager.Shutdown();
     SafeRelease(m_dwriteFactory);
     SafeRelease(m_d2dFactory);
 }
@@ -110,52 +112,33 @@ bool GhostWindow::CreateDeviceIndependentResources() {
     );
     if (FAILED(hr)) return false;
 
-    m_dwriteFactory->CreateTextFormat(
-        L"Segoe UI", nullptr,
-        DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-        15.0f, L"en-us", &m_titleFormat
-    );
+    m_fontManager.Initialize(m_dwriteFactory);
+
+    m_titleFormat = m_fontManager.GetTitleFormat();
+    if (m_titleFormat) m_titleFormat->AddRef();
+
+    m_headingFormat = m_fontManager.GetHeaderFormat();
+    if (m_headingFormat) m_headingFormat->AddRef();
+
+    m_subheadingFormat = m_fontManager.GetSubheadingFormat();
+    if (m_subheadingFormat) m_subheadingFormat->AddRef();
+
+    m_buttonFormat = m_fontManager.GetButtonFormat();
+    if (m_buttonFormat) m_buttonFormat->AddRef();
+
+    m_bodyFormat = m_fontManager.GetBodyFormat();
+    if (m_bodyFormat) m_bodyFormat->AddRef();
+
+    m_badgeFormat = m_fontManager.GetBadgeFormat();
+    if (m_badgeFormat) m_badgeFormat->AddRef();
+
+    m_codeFormat = m_fontManager.GetCodeFormat();
+    if (m_codeFormat) m_codeFormat->AddRef();
 
     m_dwriteFactory->CreateTextFormat(
-        L"Segoe UI", nullptr,
-        DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        m_fontManager.GetFontFamilyName().c_str(), nullptr,
+        DWRITE_FONT_WEIGHT_LIGHT, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
         10.5f, L"en-us", &m_subtitleFormat
-    );
-
-    m_dwriteFactory->CreateTextFormat(
-        L"Segoe UI", nullptr,
-        DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-        13.0f, L"en-us", &m_headingFormat
-    );
-
-    m_dwriteFactory->CreateTextFormat(
-        L"Segoe UI", nullptr,
-        DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-        11.0f, L"en-us", &m_subheadingFormat
-    );
-
-    m_dwriteFactory->CreateTextFormat(
-        L"Segoe UI", nullptr,
-        DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-        12.0f, L"en-us", &m_bodyFormat
-    );
-
-    m_dwriteFactory->CreateTextFormat(
-        L"Consolas", nullptr,
-        DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-        10.5f, L"en-us", &m_codeFormat
-    );
-
-    m_dwriteFactory->CreateTextFormat(
-        L"Segoe UI", nullptr,
-        DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-        10.0f, L"en-us", &m_badgeFormat
-    );
-
-    m_dwriteFactory->CreateTextFormat(
-        L"Segoe UI", nullptr,
-        DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-        10.5f, L"en-us", &m_buttonFormat
     );
 
     return true;
@@ -204,7 +187,7 @@ bool GhostWindow::CreateDeviceResources() {
         m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0.20f, 0.26f, 0.36f, 1.0f), &m_buttonHoverBrush);
 
         m_ghostRenderer.Initialize(m_renderTarget, m_dwriteFactory);
-        m_speechBubble.Initialize(m_renderTarget, m_dwriteFactory);
+        m_speechBubble.Initialize(m_renderTarget, m_dwriteFactory, m_fontManager.GetFontFamilyName());
     }
 
     return true;
@@ -263,7 +246,7 @@ void GhostWindow::Render() {
     if (!CreateDeviceResources() || !m_renderTarget) return;
 
     m_renderTarget->BeginDraw();
-    m_renderTarget->Clear(D2D1::ColorF(0.06f, 0.08f, 0.11f, 1.0f)); // Solid obsidian
+    m_renderTarget->Clear(D2D1::ColorF(0.06f, 0.08f, 0.11f, 1.0f));
 
     RenderTopHeader(m_renderTarget);
     RenderLeftPanel(m_renderTarget);
@@ -298,8 +281,8 @@ void GhostWindow::RenderTopHeader(ID2D1RenderTarget* rt) {
         rt->DrawText(title.c_str(), (UINT32)title.size(), m_titleFormat, D2D1::RectF(18.0f, 14.0f, 110.0f, 44.0f), m_accentBrush);
     }
     if (m_textMutedBrush && m_subtitleFormat) {
-        std::wstring sub = L"// OFFLINE PE STATIC TRIAGE";
-        rt->DrawText(sub.c_str(), (UINT32)sub.size(), m_subtitleFormat, D2D1::RectF(95.0f, 18.0f, 320.0f, 44.0f), m_textMutedBrush);
+        std::wstring sub = L"// OFFLINE PE STATIC TRIAGE & REVERSE ENGINEERING";
+        rt->DrawText(sub.c_str(), (UINT32)sub.size(), m_subtitleFormat, D2D1::RectF(95.0f, 18.0f, 420.0f, 44.0f), m_textMutedBrush);
     }
 
     // Setup Toolbar Buttons
@@ -310,12 +293,13 @@ void GhostWindow::RenderTopHeader(ID2D1RenderTarget* rt) {
 
     struct BtnDef { int id; std::wstring label; float width; };
     std::vector<BtnDef> btnDefs = {
-        { IDM_SCAN_FILE, L"Open PE File...", 120.0f },
-        { IDM_SAMPLE_CLEAN, L"Clean PE", 85.0f },
-        { IDM_SAMPLE_PACKED, L"Packed", 75.0f },
-        { IDM_SAMPLE_SYSCALL_PEB, L"Syscall+PEB", 100.0f },
+        { IDM_SCAN_FILE, L"Open PE...", 95.0f },
+        { IDM_TOGGLE_AUDIT, m_showAuditLog ? L"PE Findings" : L"Audit Log", 100.0f },
+        { IDM_SAMPLE_CLEAN, L"Clean PE", 75.0f },
+        { IDM_SAMPLE_PACKED, L"Packed", 68.0f },
+        { IDM_SAMPLE_SYSCALL_PEB, L"Syscall+PEB", 95.0f },
         { IDM_SAMPLE_CRED_STEALER, L"Cred Stealer", 95.0f },
-        { IDM_SAMPLE_INJECTION, L"Injection", 85.0f }
+        { IDM_SAMPLE_INJECTION, L"Injection", 78.0f }
     };
 
     // Layout buttons from right to left
@@ -368,7 +352,6 @@ void GhostWindow::RenderLeftPanel(ID2D1RenderTarget* rt) {
     float cx = panelX + panelW * 0.5f;
     float cy = panelY + 105.0f;
 
-    // Ambient radar pedestal rings
     if (m_panelBorderBrush) {
         rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy + 45.0f), 65.0f, 18.0f), m_panelBorderBrush, 1.0f);
         rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy + 45.0f), 85.0f, 24.0f), m_panelBorderBrush, 1.0f);
@@ -378,41 +361,41 @@ void GhostWindow::RenderLeftPanel(ID2D1RenderTarget* rt) {
     m_ghostRenderer.Render(rt, cx, cy);
 
     // 2. Dialogue Speech Card
-    D2D1_RECT_F dialogueRect = D2D1::RectF(panelX + 14.0f, panelY + 205.0f, panelX + panelW - 14.0f, panelY + 390.0f);
-    m_speechBubble.RenderAt(rt, dialogueRect, m_currentMood);
+    float cardY = panelY + 185.0f;
+    float cardH = 150.0f;
+    D2D1_RECT_F bubbleRect = D2D1::RectF(panelX + 16.0f, cardY, panelX + panelW - 16.0f, cardY + cardH);
+    m_speechBubble.RenderAt(rt, bubbleRect, m_currentMood);
 
-    // 3. Drop Zone Card
-    float dropY = panelY + 405.0f;
-    float dropH = panelH - (dropY - panelY) - 14.0f;
-    if (dropH > 60.0f) {
-        m_dropZoneRect = D2D1::RectF(panelX + 14.0f, dropY, panelX + panelW - 14.0f, dropY + dropH);
-        D2D1_ROUNDED_RECT dropRRect = D2D1::RoundedRect(m_dropZoneRect, 8.0f, 8.0f);
+    // 3. Drag and Drop Zone
+    float dropY = cardY + cardH + 16.0f;
+    float dropH = panelH - (dropY - panelY) - 16.0f;
+    m_dropZoneRect = D2D1::RectF(panelX + 16.0f, dropY, panelX + panelW - 16.0f, dropY + dropH);
 
-        ID2D1SolidColorBrush* dropBg = m_dropHover ? m_buttonHoverBrush : m_cardBgBrush;
-        if (dropBg) rt->FillRoundedRectangle(dropRRect, dropBg);
+    D2D1_ROUNDED_RECT dropRRect = D2D1::RoundedRect(m_dropZoneRect, 8.0f, 8.0f);
 
-        ID2D1SolidColorBrush* dropBorder = m_dropHover ? m_accentBrush : m_panelBorderBrush;
-        if (dropBorder) rt->DrawRoundedRectangle(dropRRect, dropBorder, m_dropHover ? 2.0f : 1.0f);
+    ID2D1SolidColorBrush* dropBg = m_dropHover ? m_buttonHoverBrush : m_cardBgBrush;
+    if (dropBg) rt->FillRoundedRectangle(dropRRect, dropBg);
 
-        if (m_headingFormat && m_textWhiteBrush) {
-            std::wstring dropTitle = L"[ DROP PE BINARY HERE ]";
-            DWRITE_TEXT_ALIGNMENT old = m_headingFormat->GetTextAlignment();
-            m_headingFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-            rt->DrawText(dropTitle.c_str(), (UINT32)dropTitle.size(), m_headingFormat,
-                D2D1::RectF(m_dropZoneRect.left, m_dropZoneRect.top + 16.0f, m_dropZoneRect.right, m_dropZoneRect.top + 40.0f),
-                m_accentBrush ? m_accentBrush : m_textWhiteBrush);
-            m_headingFormat->SetTextAlignment(old);
-        }
+    ID2D1SolidColorBrush* dropBorder = m_dropHover ? m_accentBrush : m_panelBorderBrush;
+    if (dropBorder) rt->DrawRoundedRectangle(dropRRect, dropBorder, m_dropHover ? 2.0f : 1.0f);
 
-        if (m_subtitleFormat && m_textMutedBrush) {
-            std::wstring dropDesc = L"Drag & drop .exe / .dll / .sys\nor click to browse files";
-            DWRITE_TEXT_ALIGNMENT old = m_subtitleFormat->GetTextAlignment();
-            m_subtitleFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-            rt->DrawText(dropDesc.c_str(), (UINT32)dropDesc.size(), m_subtitleFormat,
-                D2D1::RectF(m_dropZoneRect.left, m_dropZoneRect.top + 42.0f, m_dropZoneRect.right, m_dropZoneRect.bottom),
-                m_textMutedBrush);
-            m_subtitleFormat->SetTextAlignment(old);
-        }
+    float centerY = dropY + dropH * 0.5f;
+    if (m_subheadingFormat && m_textWhiteBrush) {
+        std::wstring dropTitle = m_dropHover ? L"DROP PE BINARY HERE" : L"DRAG & DROP BINARY";
+        DWRITE_TEXT_ALIGNMENT old = m_subheadingFormat->GetTextAlignment();
+        m_subheadingFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+        rt->DrawText(dropTitle.c_str(), (UINT32)dropTitle.size(), m_subheadingFormat,
+            D2D1::RectF(m_dropZoneRect.left, centerY - 24.0f, m_dropZoneRect.right, centerY), m_textWhiteBrush);
+        m_subheadingFormat->SetTextAlignment(old);
+    }
+
+    if (m_subtitleFormat && m_textMutedBrush) {
+        std::wstring dropSub = L"Accepts .exe, .dll, .sys\nClick to browse from disk";
+        DWRITE_TEXT_ALIGNMENT old = m_subtitleFormat->GetTextAlignment();
+        m_subtitleFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+        rt->DrawText(dropSub.c_str(), (UINT32)dropSub.size(), m_subtitleFormat,
+            D2D1::RectF(m_dropZoneRect.left, centerY + 2.0f, m_dropZoneRect.right, centerY + 36.0f), m_textMutedBrush);
+        m_subtitleFormat->SetTextAlignment(old);
     }
 }
 
@@ -422,25 +405,23 @@ void GhostWindow::RenderRightDashboard(ID2D1RenderTarget* rt) {
     float dashW = static_cast<float>(m_width) - dashX - 16.0f;
     float dashH = static_cast<float>(m_height) - dashY - 38.0f;
 
-    if (dashW < 200.0f || dashH < 200.0f) return;
-
-    // --- CARD 1: Binary Overview & Threat Meters ---
-    float card1H = 150.0f;
+    // --- CARD 1: Target Executable Identity & Security Verification ---
+    float card1H = 202.0f;
     D2D1_ROUNDED_RECT card1Rect = D2D1::RoundedRect(D2D1::RectF(dashX, dashY, dashX + dashW, dashY + card1H), 10.0f, 10.0f);
     if (m_panelBgBrush) rt->FillRoundedRectangle(card1Rect, m_panelBgBrush);
     if (m_panelBorderBrush) rt->DrawRoundedRectangle(card1Rect, m_panelBorderBrush, 1.0f);
 
     if (m_currentReport && m_currentReport->parseSuccess) {
-        // Line 1: File Name + Latency Pill
+        // Line 1: File Name + Latency Pill + Threat Score Pill
         std::wstring fileName = Utf8ToWide(m_currentReport->fileName);
         if (m_titleFormat && m_textWhiteBrush) {
             rt->DrawText(fileName.c_str(), (UINT32)fileName.size(), m_titleFormat,
-                D2D1::RectF(dashX + 16.0f, dashY + 12.0f, dashX + dashW - 130.0f, dashY + 36.0f), m_textWhiteBrush);
+                D2D1::RectF(dashX + 16.0f, dashY + 10.0f, dashX + dashW - 220.0f, dashY + 34.0f), m_textWhiteBrush);
         }
 
         // Latency Badge
         std::wstring latency = std::format(L"{:.1f} ms", m_currentReport->analysisTimeMs);
-        D2D1_ROUNDED_RECT latRect = D2D1::RoundedRect(D2D1::RectF(dashX + dashW - 110.0f, dashY + 12.0f, dashX + dashW - 16.0f, dashY + 34.0f), 4.0f, 4.0f);
+        D2D1_ROUNDED_RECT latRect = D2D1::RoundedRect(D2D1::RectF(dashX + dashW - 210.0f, dashY + 10.0f, dashX + dashW - 120.0f, dashY + 30.0f), 4.0f, 4.0f);
         if (m_cardBgBrush) rt->FillRoundedRectangle(latRect, m_cardBgBrush);
         if (m_greenBrush) rt->DrawRoundedRectangle(latRect, m_greenBrush, 1.0f);
         if (m_badgeFormat && m_greenBrush) {
@@ -451,18 +432,34 @@ void GhostWindow::RenderRightDashboard(ID2D1RenderTarget* rt) {
             m_badgeFormat->SetTextAlignment(old);
         }
 
+        // Threat Verdict Pill
+        std::wstring verdictPill = (m_currentReport->threatScore >= 60) ? L"MALICIOUS" :
+                                   (m_currentReport->threatScore >= 20) ? L"SUSPICIOUS" : L"CLEAN";
+        ID2D1SolidColorBrush* verdictColor = (m_currentReport->threatScore >= 60) ? m_redBrush :
+                                             (m_currentReport->threatScore >= 20) ? m_yellowBrush : m_greenBrush;
+        D2D1_ROUNDED_RECT verdRect = D2D1::RoundedRect(D2D1::RectF(dashX + dashW - 110.0f, dashY + 10.0f, dashX + dashW - 16.0f, dashY + 30.0f), 4.0f, 4.0f);
+        if (m_cardBgBrush) rt->FillRoundedRectangle(verdRect, m_cardBgBrush);
+        if (verdictColor) rt->DrawRoundedRectangle(verdRect, verdictColor, 1.0f);
+        if (m_badgeFormat && verdictColor) {
+            DWRITE_TEXT_ALIGNMENT old = m_badgeFormat->GetTextAlignment();
+            m_badgeFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+            rt->DrawText(verdictPill.c_str(), (UINT32)verdictPill.size(), m_badgeFormat,
+                D2D1::RectF(verdRect.rect.left, verdRect.rect.top + 3.0f, verdRect.rect.right, verdRect.rect.bottom), verdictColor);
+            m_badgeFormat->SetTextAlignment(old);
+        }
+
         // Line 2: Target File Path
         std::wstring filePath = m_currentReport->filePath;
         if (filePath.empty()) filePath = fileName;
         if (m_codeFormat && m_textDimBrush) {
             rt->DrawText(filePath.c_str(), (UINT32)filePath.size(), m_codeFormat,
-                D2D1::RectF(dashX + 16.0f, dashY + 38.0f, dashX + dashW - 16.0f, dashY + 54.0f), m_textDimBrush);
+                D2D1::RectF(dashX + 16.0f, dashY + 34.0f, dashX + dashW - 16.0f, dashY + 48.0f), m_textDimBrush);
         }
 
         // Line 3: 4 Metric Badges
         float chipW = (dashW - 32.0f - 30.0f) / 4.0f;
-        float chipY = dashY + 58.0f;
-        float chipH = 34.0f;
+        float chipY = dashY + 52.0f;
+        float chipH = 30.0f;
 
         struct MetricChip { std::wstring label; std::wstring value; };
         std::vector<MetricChip> chips = {
@@ -474,31 +471,67 @@ void GhostWindow::RenderRightDashboard(ID2D1RenderTarget* rt) {
 
         for (size_t i = 0; i < chips.size(); ++i) {
             float cX = dashX + 16.0f + i * (chipW + 10.0f);
-            D2D1_ROUNDED_RECT cRect = D2D1::RoundedRect(D2D1::RectF(cX, chipY, cX + chipW, chipY + chipH), 5.0f, 5.0f);
+            D2D1_ROUNDED_RECT cRect = D2D1::RoundedRect(D2D1::RectF(cX, chipY, cX + chipW, chipY + chipH), 4.0f, 4.0f);
             if (m_cardBgBrush) rt->FillRoundedRectangle(cRect, m_cardBgBrush);
             if (m_panelBorderBrush) rt->DrawRoundedRectangle(cRect, m_panelBorderBrush, 1.0f);
 
             if (m_badgeFormat && m_textDimBrush) {
                 rt->DrawText(chips[i].label.c_str(), (UINT32)chips[i].label.size(), m_badgeFormat,
-                    D2D1::RectF(cX + 8.0f, chipY + 2.0f, cX + chipW - 4.0f, chipY + 16.0f), m_textDimBrush);
+                    D2D1::RectF(cX + 8.0f, chipY + 2.0f, cX + chipW - 4.0f, chipY + 14.0f), m_textDimBrush);
             }
             if (m_subheadingFormat && m_textWhiteBrush) {
                 rt->DrawText(chips[i].value.c_str(), (UINT32)chips[i].value.size(), m_subheadingFormat,
-                    D2D1::RectF(cX + 8.0f, chipY + 15.0f, cX + chipW - 4.0f, chipY + 32.0f), m_textWhiteBrush);
+                    D2D1::RectF(cX + 8.0f, chipY + 13.0f, cX + chipW - 4.0f, chipY + 28.0f), m_textWhiteBrush);
             }
         }
 
-        // Line 4: Threat Score Meter & Overall Entropy Meter
-        float meterY = dashY + 102.0f;
+        // Line 4: Cryptographic Hashes (SHA-256 & Imphash / MD5)
+        float hashY = dashY + 88.0f;
+        std::wstring sha256Str = L"SHA-256: " + Utf8ToWide(m_currentReport->sha256.empty() ? "N/A" : m_currentReport->sha256);
+        std::wstring imphashStr = L"IMPHASH: " + Utf8ToWide(m_currentReport->imphash.empty() ? "N/A" : m_currentReport->imphash);
+
+        if (m_codeFormat && m_textMutedBrush) {
+            rt->DrawText(sha256Str.c_str(), (UINT32)sha256Str.size(), m_codeFormat,
+                D2D1::RectF(dashX + 16.0f, hashY, dashX + dashW * 0.65f, hashY + 16.0f), m_textMutedBrush);
+            rt->DrawText(imphashStr.c_str(), (UINT32)imphashStr.size(), m_codeFormat,
+                D2D1::RectF(dashX + dashW * 0.66f, hashY, dashX + dashW - 16.0f, hashY + 16.0f), m_textMutedBrush);
+        }
+
+        // Line 5: Authenticode Digital Signature Status
+        float certY = dashY + 108.0f;
+        std::wstring certLabel;
+        ID2D1SolidColorBrush* certBrush = m_textDimBrush;
+        if (m_currentReport->signature.isValid) {
+            certBrush = m_greenBrush;
+            certLabel = L"[VALID CERT] Publisher: " + Utf8ToWide(m_currentReport->signature.signerSubject) +
+                        L" | Issuer: " + Utf8ToWide(m_currentReport->signature.signerIssuer);
+            if (m_currentReport->signature.isTrustedVendor) {
+                certLabel += L" [TRUSTED VENDOR]";
+            }
+        } else if (m_currentReport->signature.isSigned) {
+            certBrush = m_yellowBrush;
+            certLabel = L"[UNTRUSTED/SELF-SIGNED] Subject: " + Utf8ToWide(m_currentReport->signature.signerSubject);
+        } else {
+            certBrush = m_textDimBrush;
+            certLabel = L"[UNSIGNED BINARY] No Authenticode signature present";
+        }
+
+        if (m_codeFormat && certBrush) {
+            rt->DrawText(certLabel.c_str(), (UINT32)certLabel.size(), m_codeFormat,
+                D2D1::RectF(dashX + 16.0f, certY, dashX + dashW - 16.0f, certY + 16.0f), certBrush);
+        }
+
+        // Line 6: Threat Score & Shannon Entropy Progress Bars
+        float meterY = dashY + 132.0f;
         float halfW = (dashW - 32.0f - 20.0f) * 0.5f;
 
         // Threat Score Meter
         std::wstring threatLabel = std::format(L"Threat Score: {} / 100 [{}]",
             m_currentReport->threatScore,
-            (m_currentReport->threatScore >= 60 ? L"MALICIOUS" : m_currentReport->threatScore >= 30 ? L"SUSPICIOUS" : L"CLEAN"));
+            (m_currentReport->threatScore >= 60 ? L"MALICIOUS" : m_currentReport->threatScore >= 20 ? L"SUSPICIOUS" : L"CLEAN"));
 
         ID2D1SolidColorBrush* threatColor = (m_currentReport->threatScore >= 60) ? m_redBrush :
-                                            (m_currentReport->threatScore >= 30) ? m_yellowBrush : m_greenBrush;
+                                            (m_currentReport->threatScore >= 20) ? m_yellowBrush : m_greenBrush;
 
         if (m_badgeFormat && threatColor) {
             rt->DrawText(threatLabel.c_str(), (UINT32)threatLabel.size(), m_badgeFormat,
@@ -530,172 +563,276 @@ void GhostWindow::RenderRightDashboard(ID2D1RenderTarget* rt) {
             D2D1_ROUNDED_RECT eFill = D2D1::RoundedRect(D2D1::RectF(entX, meterY + 18.0f, entX + eFillW, meterY + 26.0f), 3.0f, 3.0f);
             rt->FillRoundedRectangle(eFill, entColor);
         }
-
     } else {
         // Empty State Banner
         if (m_headingFormat && m_textWhiteBrush) {
             std::wstring emptyTitle = L"READY FOR ANALYSIS // NO BINARY LOADED";
             rt->DrawText(emptyTitle.c_str(), (UINT32)emptyTitle.size(), m_headingFormat,
-                D2D1::RectF(dashX + 16.0f, dashY + 25.0f, dashX + dashW - 16.0f, dashY + 50.0f), m_textWhiteBrush);
+                D2D1::RectF(dashX + 16.0f, dashY + 40.0f, dashX + dashW - 16.0f, dashY + 65.0f), m_textWhiteBrush);
         }
         if (m_bodyFormat && m_textMutedBrush) {
-            std::wstring emptyBody = L"Drag and drop an executable (.exe, .dll, .sys) into Koltzi or select a malware profile above to begin offline triage.\n"
-                                     L"Heuristics inspect direct syscalls, manual PEB traversal, Shannon entropy, and cross-process injection chains.";
+            std::wstring emptyBody = L"Drag and drop an executable (.exe, .dll, .sys) into Koltzi or select a profile above to begin offline triage.\n"
+                                     L"Computes standard AV hashes (MD5, SHA-1, SHA-256, Imphash) and performs WinVerifyTrust Authenticode verification.";
             rt->DrawText(emptyBody.c_str(), (UINT32)emptyBody.size(), m_bodyFormat,
-                D2D1::RectF(dashX + 16.0f, dashY + 55.0f, dashX + dashW - 16.0f, dashY + 120.0f), m_textMutedBrush);
+                D2D1::RectF(dashX + 16.0f, dashY + 75.0f, dashX + dashW - 16.0f, dashY + 140.0f), m_textMutedBrush);
         }
     }
 
-    // --- CARD 2: Section Breakdown Table ---
-    float card2Y = dashY + card1H + 12.0f;
-    float card2H = 200.0f;
-    D2D1_ROUNDED_RECT card2Rect = D2D1::RoundedRect(D2D1::RectF(dashX, card2Y, dashX + dashW, card2Y + card2H), 10.0f, 10.0f);
-    if (m_panelBgBrush) rt->FillRoundedRectangle(card2Rect, m_panelBgBrush);
-    if (m_panelBorderBrush) rt->DrawRoundedRectangle(card2Rect, m_panelBorderBrush, 1.0f);
+    // --- VIEW TABS: [PE Structure & Findings] vs [Audit & Triage Log] ---
+    float tabY = dashY + card1H + 10.0f;
+    float tabH = 26.0f;
+    float tabW = 200.0f;
 
-    // Header Title
-    std::wstring card2Title = L"PE SECTION TABLE & SHANNON ENTROPY (256-BIN LOOKUP)";
-    if (m_subheadingFormat && m_accentBrush) {
-        rt->DrawText(card2Title.c_str(), (UINT32)card2Title.size(), m_subheadingFormat,
-            D2D1::RectF(dashX + 16.0f, card2Y + 10.0f, dashX + dashW - 16.0f, card2Y + 28.0f), m_accentBrush);
+    m_tabFindingsRect = D2D1::RectF(dashX, tabY, dashX + tabW, tabY + tabH);
+    m_tabAuditRect = D2D1::RectF(dashX + tabW + 8.0f, tabY, dashX + tabW * 2 + 8.0f, tabY + tabH);
+
+    // Tab 1: Findings
+    D2D1_ROUNDED_RECT t1R = D2D1::RoundedRect(m_tabFindingsRect, 4.0f, 4.0f);
+    ID2D1SolidColorBrush* t1Bg = (!m_showAuditLog) ? m_panelBgBrush : m_cardBgBrush;
+    ID2D1SolidColorBrush* t1Border = (!m_showAuditLog) ? m_accentBrush : m_panelBorderBrush;
+    ID2D1SolidColorBrush* t1Txt = (!m_showAuditLog) ? m_accentBrush : m_textDimBrush;
+    if (t1Bg) rt->FillRoundedRectangle(t1R, t1Bg);
+    if (t1Border) rt->DrawRoundedRectangle(t1R, t1Border, 1.0f);
+    if (m_badgeFormat && t1Txt) {
+        DWRITE_TEXT_ALIGNMENT old = m_badgeFormat->GetTextAlignment();
+        m_badgeFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+        rt->DrawText(L"1. PE FINDINGS & SECTIONS", 25, m_badgeFormat,
+            D2D1::RectF(m_tabFindingsRect.left, m_tabFindingsRect.top + 5.0f, m_tabFindingsRect.right, m_tabFindingsRect.bottom), t1Txt);
+        m_badgeFormat->SetTextAlignment(old);
     }
 
-    // Table Column Headers
-    float tableY = card2Y + 34.0f;
-    float colNameW = 100.0f;
-    float colVSizeW = 110.0f;
-    float colRSizeW = 110.0f;
-    float colEntW = 180.0f;
-
-    float col1 = dashX + 16.0f;
-    float col2 = col1 + colNameW;
-    float col3 = col2 + colVSizeW;
-    float col4 = col3 + colRSizeW;
-    float col5 = col4 + colEntW;
-
-    if (m_codeFormat && m_textDimBrush) {
-        rt->DrawText(L"SECTION", 7, m_codeFormat, D2D1::RectF(col1, tableY, col2, tableY + 18.0f), m_textDimBrush);
-        rt->DrawText(L"VIRT_SIZE", 9, m_codeFormat, D2D1::RectF(col2, tableY, col3, tableY + 18.0f), m_textDimBrush);
-        rt->DrawText(L"RAW_SIZE", 8, m_codeFormat, D2D1::RectF(col3, tableY, col4, tableY + 18.0f), m_textDimBrush);
-        rt->DrawText(L"ENTROPY (0 - 8.0)", 17, m_codeFormat, D2D1::RectF(col4, tableY, col5, tableY + 18.0f), m_textDimBrush);
-        rt->DrawText(L"VERDICT / FLAGS", 15, m_codeFormat, D2D1::RectF(col5, tableY, dashX + dashW - 16.0f, tableY + 18.0f), m_textDimBrush);
+    // Tab 2: Audit Log
+    size_t logCount = (m_currentReport) ? m_currentReport->logEntries.size() : 0;
+    std::wstring t2Title = std::format(L"2. AUDIT LOG ({} EVENTS)", logCount);
+    D2D1_ROUNDED_RECT t2R = D2D1::RoundedRect(m_tabAuditRect, 4.0f, 4.0f);
+    ID2D1SolidColorBrush* t2Bg = (m_showAuditLog) ? m_panelBgBrush : m_cardBgBrush;
+    ID2D1SolidColorBrush* t2Border = (m_showAuditLog) ? m_accentBrush : m_panelBorderBrush;
+    ID2D1SolidColorBrush* t2Txt = (m_showAuditLog) ? m_accentBrush : m_textDimBrush;
+    if (t2Bg) rt->FillRoundedRectangle(t2R, t2Bg);
+    if (t2Border) rt->DrawRoundedRectangle(t2R, t2Border, 1.0f);
+    if (m_badgeFormat && t2Txt) {
+        DWRITE_TEXT_ALIGNMENT old = m_badgeFormat->GetTextAlignment();
+        m_badgeFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+        rt->DrawText(t2Title.c_str(), (UINT32)t2Title.size(), m_badgeFormat,
+            D2D1::RectF(m_tabAuditRect.left, m_tabAuditRect.top + 5.0f, m_tabAuditRect.right, m_tabAuditRect.bottom), t2Txt);
+        m_badgeFormat->SetTextAlignment(old);
     }
 
-    // Divider line
-    if (m_panelBorderBrush) {
-        rt->DrawLine(D2D1::Point2F(dashX + 16.0f, tableY + 19.0f), D2D1::Point2F(dashX + dashW - 16.0f, tableY + 19.0f), m_panelBorderBrush, 1.0f);
-    }
+    float contentY = tabY + tabH + 8.0f;
+    float contentH = dashH - (contentY - dashY);
 
-    // Rows
-    float rowY = tableY + 24.0f;
-    if (m_currentReport && !m_currentReport->sections.empty()) {
-        size_t maxRows = std::min<size_t>(m_currentReport->sections.size(), 6);
-        for (size_t i = 0; i < maxRows; ++i) {
-            const auto& sec = m_currentReport->sections[i];
-            std::wstring sName = Utf8ToWide(sec.name);
-            std::wstring sVSize = std::format(L"0x{:X}", sec.virtualSize);
-            std::wstring sRSize = std::format(L"{} B", sec.rawSize);
-            std::wstring sEnt = std::format(L"{:.2f}", sec.entropy);
+    if (m_showAuditLog) {
+        // --- VIEW B: HIGH-DETAIL AUDIT & TRIAGE LOG ---
+        D2D1_ROUNDED_RECT auditCardRect = D2D1::RoundedRect(D2D1::RectF(dashX, contentY, dashX + dashW, contentY + contentH), 10.0f, 10.0f);
+        if (m_panelBgBrush) rt->FillRoundedRectangle(auditCardRect, m_panelBgBrush);
+        if (m_panelBorderBrush) rt->DrawRoundedRectangle(auditCardRect, m_panelBorderBrush, 1.0f);
 
-            // Alternate row background highlight
-            if (i % 2 == 1 && m_cardBgBrush) {
-                rt->FillRectangle(D2D1::RectF(col1 - 4.0f, rowY - 2.0f, dashX + dashW - 16.0f, rowY + 18.0f), m_cardBgBrush);
-            }
-
-            if (m_codeFormat && m_textWhiteBrush) {
-                rt->DrawText(sName.c_str(), (UINT32)sName.size(), m_codeFormat, D2D1::RectF(col1, rowY, col2, rowY + 18.0f), m_textWhiteBrush);
-            }
-            if (m_codeFormat && m_textMutedBrush) {
-                rt->DrawText(sVSize.c_str(), (UINT32)sVSize.size(), m_codeFormat, D2D1::RectF(col2, rowY, col3, rowY + 18.0f), m_textMutedBrush);
-                rt->DrawText(sRSize.c_str(), (UINT32)sRSize.size(), m_codeFormat, D2D1::RectF(col3, rowY, col4, rowY + 18.0f), m_textMutedBrush);
-            }
-
-            // Entropy Mini Progress Bar + Number
-            float barTotalW = 100.0f;
-            float barFilled = barTotalW * std::min(1.0f, static_cast<float>(sec.entropy) / 8.0f);
-            D2D1_ROUNDED_RECT miniTrack = D2D1::RoundedRect(D2D1::RectF(col4, rowY + 4.0f, col4 + barTotalW, rowY + 12.0f), 2.0f, 2.0f);
-            if (m_cardBgBrush) rt->FillRoundedRectangle(miniTrack, m_cardBgBrush);
-
-            ID2D1SolidColorBrush* secColor = (sec.entropy > 7.2f) ? m_yellowBrush : m_accentBrush;
-            if (secColor && barFilled > 2.0f) {
-                D2D1_ROUNDED_RECT miniFill = D2D1::RoundedRect(D2D1::RectF(col4, rowY + 4.0f, col4 + barFilled, rowY + 12.0f), 2.0f, 2.0f);
-                rt->FillRoundedRectangle(miniFill, secColor);
-            }
-            if (m_codeFormat && secColor) {
-                rt->DrawText(sEnt.c_str(), (UINT32)sEnt.size(), m_codeFormat, D2D1::RectF(col4 + barTotalW + 10.0f, rowY, col5, rowY + 18.0f), secColor);
-            }
-
-            // Flags / Verdict
-            std::wstring flagStr;
-            ID2D1SolidColorBrush* flagColor = m_textMutedBrush;
-            if (sec.isRwx) {
-                flagStr = L"[RWX VIOLATION]";
-                flagColor = m_redBrush;
-            } else if (sec.isSuspiciousEntropy) {
-                flagStr = L"[HIGH ENTROPY / PACKED]";
-                flagColor = m_yellowBrush;
-            } else {
-                flagStr = L"OK";
-                flagColor = m_greenBrush;
-            }
-
-            if (m_codeFormat && flagColor) {
-                rt->DrawText(flagStr.c_str(), (UINT32)flagStr.size(), m_codeFormat, D2D1::RectF(col5, rowY, dashX + dashW - 16.0f, rowY + 18.0f), flagColor);
-            }
-
-            rowY += 22.0f;
+        std::wstring auditHeader = L"CHRONOLOGICAL STATIC REVERSE ENGINEERING AUDIT LOG";
+        if (m_subheadingFormat && m_accentBrush) {
+            rt->DrawText(auditHeader.c_str(), (UINT32)auditHeader.size(), m_subheadingFormat,
+                D2D1::RectF(dashX + 16.0f, contentY + 10.0f, dashX + dashW - 16.0f, contentY + 28.0f), m_accentBrush);
         }
-    } else {
-        if (m_codeFormat && m_textDimBrush) {
-            std::wstring noSec = L"No section information available yet.";
-            rt->DrawText(noSec.c_str(), (UINT32)noSec.size(), m_codeFormat, D2D1::RectF(col1, rowY, dashX + dashW - 16.0f, rowY + 20.0f), m_textDimBrush);
-        }
-    }
 
-    // --- CARD 3: Reverse Engineering Findings & Heuristic Detections ---
-    float card3Y = card2Y + card2H + 12.0f;
-    float card3H = dashH - (card3Y - dashY);
-    if (card3H < 80.0f) card3H = 80.0f;
+        IDWriteTextFormat* logFmt = m_fontManager.GetLogFormat();
+        if (!logFmt) logFmt = m_codeFormat;
 
-    D2D1_ROUNDED_RECT card3Rect = D2D1::RoundedRect(D2D1::RectF(dashX, card3Y, dashX + dashW, card3Y + card3H), 10.0f, 10.0f);
-    if (m_panelBgBrush) rt->FillRoundedRectangle(card3Rect, m_panelBgBrush);
-    if (m_panelBorderBrush) rt->DrawRoundedRectangle(card3Rect, m_panelBorderBrush, 1.0f);
+        float entryY = contentY + 34.0f;
+        if (m_currentReport && !m_currentReport->logEntries.empty()) {
+            size_t maxLogs = static_cast<size_t>(std::max(1, static_cast<int>((contentH - 44.0f) / 19.0f)));
+            size_t count = std::min(m_currentReport->logEntries.size(), maxLogs);
 
-    std::wstring card3Title = L"LOW-LEVEL HEURISTICS & REVERSE ENGINEERING FINDINGS";
-    if (m_subheadingFormat && m_accentBrush) {
-        rt->DrawText(card3Title.c_str(), (UINT32)card3Title.size(), m_subheadingFormat,
-            D2D1::RectF(dashX + 16.0f, card3Y + 10.0f, dashX + dashW - 16.0f, card3Y + 28.0f), m_accentBrush);
-    }
+            for (size_t i = 0; i < count; ++i) {
+                const auto& entry = m_currentReport->logEntries[i];
 
-    float findY = card3Y + 32.0f;
-    if (m_currentReport && !m_currentReport->technicalDetails.empty()) {
-        size_t maxFindings = static_cast<size_t>(std::max(1, static_cast<int>((card3H - 42.0f) / 20.0f)));
-        size_t count = std::min(m_currentReport->technicalDetails.size(), maxFindings);
+                if (i % 2 == 1 && m_cardBgBrush) {
+                    rt->FillRectangle(D2D1::RectF(dashX + 8.0f, entryY - 2.0f, dashX + dashW - 8.0f, entryY + 17.0f), m_cardBgBrush);
+                }
 
-        for (size_t i = 0; i < count; ++i) {
-            const auto& detail = m_currentReport->technicalDetails[i];
-            std::wstring wDetail = Utf8ToWide(detail);
+                // Timestamp (Cyan)
+                std::wstring ts = Utf8ToWide(entry.timestamp);
+                if (logFmt && m_accentBrush) {
+                    rt->DrawText(ts.c_str(), (UINT32)ts.size(), logFmt,
+                        D2D1::RectF(dashX + 16.0f, entryY, dashX + 90.0f, entryY + 18.0f), m_accentBrush);
+                }
 
-            ID2D1SolidColorBrush* lineBrush = m_textMutedBrush;
-            if (detail.starts_with("[CRITICAL]")) {
-                lineBrush = m_redBrush;
-            } else if (detail.starts_with("[WARNING]")) {
-                lineBrush = m_yellowBrush;
-            } else if (detail.starts_with("[INFO]")) {
-                lineBrush = m_greenBrush;
+                // Subsystem Badge (Muted)
+                std::wstring subsys = L"[" + Utf8ToWide(entry.subsystem) + L"]";
+                if (logFmt && m_textMutedBrush) {
+                    rt->DrawText(subsys.c_str(), (UINT32)subsys.size(), logFmt,
+                        D2D1::RectF(dashX + 92.0f, entryY, dashX + 165.0f, entryY + 18.0f), m_textMutedBrush);
+                }
+
+                // Level Color
+                ID2D1SolidColorBrush* lvlBrush = m_textMutedBrush;
+                if (entry.level == "CRIT") lvlBrush = m_redBrush;
+                else if (entry.level == "WARN") lvlBrush = m_yellowBrush;
+                else if (entry.level == "PASS") lvlBrush = m_greenBrush;
+                else if (entry.level == "AUDIT") lvlBrush = m_textWhiteBrush;
+
+                std::wstring lvl = Utf8ToWide(entry.level);
+                if (logFmt && lvlBrush) {
+                    rt->DrawText(lvl.c_str(), (UINT32)lvl.size(), logFmt,
+                        D2D1::RectF(dashX + 170.0f, entryY, dashX + 220.0f, entryY + 18.0f), lvlBrush);
+                }
+
+                // Message Text
+                std::wstring msg = Utf8ToWide(entry.message);
+                if (logFmt && m_textWhiteBrush) {
+                    rt->DrawText(msg.c_str(), (UINT32)msg.size(), logFmt,
+                        D2D1::RectF(dashX + 225.0f, entryY, dashX + dashW - 16.0f, entryY + 18.0f), m_textWhiteBrush);
+                }
+
+                entryY += 19.0f;
             }
-
-            if (m_codeFormat && lineBrush) {
-                rt->DrawText(wDetail.c_str(), (UINT32)wDetail.size(), m_codeFormat,
-                    D2D1::RectF(dashX + 16.0f, findY, dashX + dashW - 16.0f, findY + 18.0f), lineBrush);
+        } else {
+            if (m_codeFormat && m_textDimBrush) {
+                std::wstring noLogs = L"No triage audit logs recorded. Load a binary or run a sample test to view the log stream.";
+                rt->DrawText(noLogs.c_str(), (UINT32)noLogs.size(), m_codeFormat,
+                    D2D1::RectF(dashX + 16.0f, entryY, dashX + dashW - 16.0f, entryY + 20.0f), m_textDimBrush);
             }
-            findY += 20.0f;
         }
     } else {
+        // --- VIEW A: PE SECTION TABLE & HEURISTIC FINDINGS ---
+        float card2H = std::min(185.0f, contentH * 0.48f);
+        D2D1_ROUNDED_RECT card2Rect = D2D1::RoundedRect(D2D1::RectF(dashX, contentY, dashX + dashW, contentY + card2H), 10.0f, 10.0f);
+        if (m_panelBgBrush) rt->FillRoundedRectangle(card2Rect, m_panelBgBrush);
+        if (m_panelBorderBrush) rt->DrawRoundedRectangle(card2Rect, m_panelBorderBrush, 1.0f);
+
+        std::wstring card2Title = L"PE SECTION TABLE & SHANNON ENTROPY (256-BIN LOOKUP)";
+        if (m_subheadingFormat && m_accentBrush) {
+            rt->DrawText(card2Title.c_str(), (UINT32)card2Title.size(), m_subheadingFormat,
+                D2D1::RectF(dashX + 16.0f, contentY + 10.0f, dashX + dashW - 16.0f, contentY + 28.0f), m_accentBrush);
+        }
+
+        // Table Column Headers
+        float tableY = contentY + 32.0f;
+        float colNameW = 100.0f;
+        float colVSizeW = 110.0f;
+        float colRSizeW = 110.0f;
+        float colEntW = 180.0f;
+
+        float col1 = dashX + 16.0f;
+        float col2 = col1 + colNameW;
+        float col3 = col2 + colVSizeW;
+        float col4 = col3 + colRSizeW;
+        float col5 = col4 + colEntW;
+
         if (m_codeFormat && m_textDimBrush) {
-            std::wstring noFindings = L"No heuristic red flags or warnings recorded.";
-            rt->DrawText(noFindings.c_str(), (UINT32)noFindings.size(), m_codeFormat,
-                D2D1::RectF(dashX + 16.0f, findY, dashX + dashW - 16.0f, findY + 20.0f), m_textDimBrush);
+            rt->DrawText(L"SECTION", 7, m_codeFormat, D2D1::RectF(col1, tableY, col2, tableY + 18.0f), m_textDimBrush);
+            rt->DrawText(L"VIRT_SIZE", 9, m_codeFormat, D2D1::RectF(col2, tableY, col3, tableY + 18.0f), m_textDimBrush);
+            rt->DrawText(L"RAW_SIZE", 8, m_codeFormat, D2D1::RectF(col3, tableY, col4, tableY + 18.0f), m_textDimBrush);
+            rt->DrawText(L"ENTROPY (0 - 8.0)", 17, m_codeFormat, D2D1::RectF(col4, tableY, col5, tableY + 18.0f), m_textDimBrush);
+            rt->DrawText(L"VERDICT / FLAGS", 15, m_codeFormat, D2D1::RectF(col5, tableY, dashX + dashW - 16.0f, tableY + 18.0f), m_textDimBrush);
+        }
+
+        if (m_panelBorderBrush) {
+            rt->DrawLine(D2D1::Point2F(dashX + 16.0f, tableY + 18.0f), D2D1::Point2F(dashX + dashW - 16.0f, tableY + 18.0f), m_panelBorderBrush, 1.0f);
+        }
+
+        float rowY = tableY + 22.0f;
+        if (m_currentReport && !m_currentReport->sections.empty()) {
+            size_t maxRows = std::min<size_t>(m_currentReport->sections.size(), 5);
+            for (size_t i = 0; i < maxRows; ++i) {
+                const auto& sec = m_currentReport->sections[i];
+                std::wstring sName = Utf8ToWide(sec.name);
+                std::wstring sVSize = std::format(L"0x{:X}", sec.virtualSize);
+                std::wstring sRSize = std::format(L"{} B", sec.rawSize);
+                std::wstring sEnt = std::format(L"{:.2f}", sec.entropy);
+
+                if (i % 2 == 1 && m_cardBgBrush) {
+                    rt->FillRectangle(D2D1::RectF(col1 - 4.0f, rowY - 2.0f, dashX + dashW - 16.0f, rowY + 18.0f), m_cardBgBrush);
+                }
+
+                if (m_codeFormat && m_textWhiteBrush) {
+                    rt->DrawText(sName.c_str(), (UINT32)sName.size(), m_codeFormat, D2D1::RectF(col1, rowY, col2, rowY + 18.0f), m_textWhiteBrush);
+                }
+                if (m_codeFormat && m_textMutedBrush) {
+                    rt->DrawText(sVSize.c_str(), (UINT32)sVSize.size(), m_codeFormat, D2D1::RectF(col2, rowY, col3, rowY + 18.0f), m_textMutedBrush);
+                    rt->DrawText(sRSize.c_str(), (UINT32)sRSize.size(), m_codeFormat, D2D1::RectF(col3, rowY, col4, rowY + 18.0f), m_textMutedBrush);
+                }
+
+                // Entropy Mini Progress Bar
+                float barTotalW = 100.0f;
+                float barFilled = barTotalW * std::min(1.0f, static_cast<float>(sec.entropy) / 8.0f);
+                D2D1_ROUNDED_RECT miniTrack = D2D1::RoundedRect(D2D1::RectF(col4, rowY + 4.0f, col4 + barTotalW, rowY + 12.0f), 2.0f, 2.0f);
+                if (m_cardBgBrush) rt->FillRoundedRectangle(miniTrack, m_cardBgBrush);
+
+                ID2D1SolidColorBrush* secColor = (sec.entropy > 7.2f) ? m_yellowBrush : m_accentBrush;
+                if (secColor && barFilled > 2.0f) {
+                    D2D1_ROUNDED_RECT miniFill = D2D1::RoundedRect(D2D1::RectF(col4, rowY + 4.0f, col4 + barFilled, rowY + 12.0f), 2.0f, 2.0f);
+                    rt->FillRoundedRectangle(miniFill, secColor);
+                }
+                if (m_codeFormat && secColor) {
+                    rt->DrawText(sEnt.c_str(), (UINT32)sEnt.size(), m_codeFormat, D2D1::RectF(col4 + barTotalW + 10.0f, rowY, col5, rowY + 18.0f), secColor);
+                }
+
+                // Flags / Verdict
+                std::wstring flagStr;
+                ID2D1SolidColorBrush* flagColor = m_textMutedBrush;
+                if (sec.isRwx) {
+                    flagStr = L"[RWX VIOLATION]";
+                    flagColor = m_redBrush;
+                } else if (sec.isSuspiciousEntropy) {
+                    flagStr = L"[HIGH ENTROPY / PACKED]";
+                    flagColor = m_yellowBrush;
+                } else {
+                    flagStr = L"OK";
+                    flagColor = m_greenBrush;
+                }
+
+                if (m_codeFormat && flagColor) {
+                    rt->DrawText(flagStr.c_str(), (UINT32)flagStr.size(), m_codeFormat, D2D1::RectF(col5, rowY, dashX + dashW - 16.0f, rowY + 18.0f), flagColor);
+                }
+
+                rowY += 21.0f;
+            }
+        }
+
+        // --- CARD 3: Reverse Engineering Findings & Correlated Threat Analysis ---
+        float card3Y = contentY + card2H + 10.0f;
+        float card3H = contentH - (card3Y - contentY);
+        if (card3H < 80.0f) card3H = 80.0f;
+
+        D2D1_ROUNDED_RECT card3Rect = D2D1::RoundedRect(D2D1::RectF(dashX, card3Y, dashX + dashW, card3Y + card3H), 10.0f, 10.0f);
+        if (m_panelBgBrush) rt->FillRoundedRectangle(card3Rect, m_panelBgBrush);
+        if (m_panelBorderBrush) rt->DrawRoundedRectangle(card3Rect, m_panelBorderBrush, 1.0f);
+
+        std::wstring card3Title = L"LOW-LEVEL HEURISTICS & REVERSE ENGINEERING FINDINGS";
+        if (m_subheadingFormat && m_accentBrush) {
+            rt->DrawText(card3Title.c_str(), (UINT32)card3Title.size(), m_subheadingFormat,
+                D2D1::RectF(dashX + 16.0f, card3Y + 10.0f, dashX + dashW - 16.0f, card3Y + 28.0f), m_accentBrush);
+        }
+
+        float findY = card3Y + 32.0f;
+        if (m_currentReport && !m_currentReport->technicalDetails.empty()) {
+            size_t maxFindings = static_cast<size_t>(std::max(1, static_cast<int>((card3H - 40.0f) / 19.0f)));
+            size_t count = std::min(m_currentReport->technicalDetails.size(), maxFindings);
+
+            for (size_t i = 0; i < count; ++i) {
+                const auto& detail = m_currentReport->technicalDetails[i];
+                std::wstring wDetail = Utf8ToWide(detail);
+
+                ID2D1SolidColorBrush* lineBrush = m_textMutedBrush;
+                if (detail.starts_with("[CRITICAL]")) {
+                    lineBrush = m_redBrush;
+                } else if (detail.starts_with("[WARNING]")) {
+                    lineBrush = m_yellowBrush;
+                } else if (detail.starts_with("[INFO]")) {
+                    lineBrush = m_greenBrush;
+                }
+
+                if (m_codeFormat && lineBrush) {
+                    rt->DrawText(wDetail.c_str(), (UINT32)wDetail.size(), m_codeFormat,
+                        D2D1::RectF(dashX + 16.0f, findY, dashX + dashW - 16.0f, findY + 18.0f), lineBrush);
+                }
+                findY += 19.0f;
+            }
+        } else {
+            if (m_codeFormat && m_textDimBrush) {
+                std::wstring noFindings = L"No heuristic red flags or warnings recorded.";
+                rt->DrawText(noFindings.c_str(), (UINT32)noFindings.size(), m_codeFormat,
+                    D2D1::RectF(dashX + 16.0f, findY, dashX + dashW - 16.0f, findY + 20.0f), m_textDimBrush);
+            }
         }
     }
 }
@@ -711,7 +848,7 @@ void GhostWindow::RenderFooter(ID2D1RenderTarget* rt) {
     }
 
     if (m_subtitleFormat && m_textDimBrush) {
-        std::wstring leftInfo = L"Koltzi Engine v1.0 | Offline Static PE Triage | Zero Telemetry | Static CRT /MT";
+        std::wstring leftInfo = L"Koltzi Engine v1.0 | Offline Static PE Triage | Creato Display Typography | /MT";
         rt->DrawText(leftInfo.c_str(), (UINT32)leftInfo.size(), m_subtitleFormat,
             D2D1::RectF(16.0f, footerY + 4.0f, 600.0f, static_cast<float>(m_height)), m_textDimBrush);
 
@@ -727,6 +864,7 @@ void GhostWindow::RenderFooter(ID2D1RenderTarget* rt) {
 void GhostWindow::ShowContextMenu(int screenX, int screenY) {
     HMENU hMenu = CreatePopupMenu();
     AppendMenuW(hMenu, MF_STRING, IDM_SCAN_FILE, L"Analyze PE Binary File...");
+    AppendMenuW(hMenu, MF_STRING, IDM_TOGGLE_AUDIT, m_showAuditLog ? L"Switch to PE Findings View" : L"Switch to Audit & Triage Log View");
     AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(hMenu, MF_STRING, IDM_SAMPLE_CLEAN, L"Test Profile: Clean PE (Standard Imports)");
     AppendMenuW(hMenu, MF_STRING, IDM_SAMPLE_PACKED, L"Test Profile: High Entropy / Packed Code");
@@ -742,7 +880,10 @@ void GhostWindow::ShowContextMenu(int screenX, int screenY) {
     int cmd = TrackPopupMenu(hMenu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON, screenX, screenY, 0, m_hwnd, nullptr);
     DestroyMenu(hMenu);
 
-    if (cmd != 0 && m_onCommand) {
+    if (cmd == IDM_TOGGLE_AUDIT) {
+        m_showAuditLog = !m_showAuditLog;
+        InvalidateRect(m_hwnd, nullptr, FALSE);
+    } else if (cmd != 0 && m_onCommand) {
         m_onCommand(cmd);
     }
 }
@@ -783,7 +924,7 @@ LRESULT GhostWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
     }
 
     case WM_ERASEBKGND:
-        return 1; // Direct2D handles full background rendering
+        return 1;
 
     case WM_SIZE: {
         UINT w = LOWORD(lParam);
@@ -823,7 +964,12 @@ LRESULT GhostWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
         m_dropHover = (x >= m_dropZoneRect.left && x <= m_dropZoneRect.right &&
                        y >= m_dropZoneRect.top && y <= m_dropZoneRect.bottom);
 
-        if (m_hoveredButton != -1 || m_dropHover) {
+        bool isTabHover = (x >= m_tabFindingsRect.left && x <= m_tabFindingsRect.right &&
+                           y >= m_tabFindingsRect.top && y <= m_tabFindingsRect.bottom) ||
+                          (x >= m_tabAuditRect.left && x <= m_tabAuditRect.right &&
+                           y >= m_tabAuditRect.top && y <= m_tabAuditRect.bottom);
+
+        if (m_hoveredButton != -1 || m_dropHover || isTabHover) {
             SetCursor(LoadCursor(nullptr, IDC_HAND));
         } else {
             SetCursor(LoadCursor(nullptr, IDC_ARROW));
@@ -842,9 +988,28 @@ LRESULT GhostWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
         // Check Toolbar Button clicks
         for (const auto& b : m_buttons) {
             if (x >= b.rect.left && x <= b.rect.right && y >= b.rect.top && y <= b.rect.bottom) {
+                if (b.id == IDM_TOGGLE_AUDIT) {
+                    m_showAuditLog = !m_showAuditLog;
+                    InvalidateRect(hwnd, nullptr, FALSE);
+                    return 0;
+                }
                 if (m_onCommand) m_onCommand(b.id);
                 return 0;
             }
+        }
+
+        // Check Tab Clicks
+        if (x >= m_tabFindingsRect.left && x <= m_tabFindingsRect.right &&
+            y >= m_tabFindingsRect.top && y <= m_tabFindingsRect.bottom) {
+            m_showAuditLog = false;
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return 0;
+        }
+        if (x >= m_tabAuditRect.left && x <= m_tabAuditRect.right &&
+            y >= m_tabAuditRect.top && y <= m_tabAuditRect.bottom) {
+            m_showAuditLog = true;
+            InvalidateRect(hwnd, nullptr, FALSE);
+            return 0;
         }
 
         // Check Drop Zone click

@@ -54,9 +54,13 @@ include_directories(
 set(KOLTZI_SOURCES
     src/Main.cpp
     src/Common.h
+    res/resource.h
+    res/Koltzi.rc
     src/Core/TriageReport.h
     src/Core/PeReader.h
     src/Core/PeReader.cpp
+    src/Core/CryptoVerifier.h
+    src/Core/CryptoVerifier.cpp
     src/Core/InstructionScanner.h
     src/Core/InstructionScanner.cpp
     src/Core/StringScanner.h
@@ -64,6 +68,8 @@ set(KOLTZI_SOURCES
     src/Core/ThreatAssessor.h
     src/Core/ThreatAssessor.cpp
     src/UI/AnimationTypes.h
+    src/UI/FontManager.h
+    src/UI/FontManager.cpp
     src/UI/GhostRenderer.h
     src/UI/GhostRenderer.cpp
     src/UI/SpeechBubble.h
@@ -89,12 +95,16 @@ target_link_libraries(Koltzi PRIVATE
     gdi32
     ole32
     comdlg32
+    bcrypt
+    wintrust
+    crypt32
 )
 
 # Build tests executable
 add_executable(KoltziTests
     tests/TestRunner.cpp
     src/Core/PeReader.cpp
+    src/Core/CryptoVerifier.cpp
     src/Core/InstructionScanner.cpp
     src/Core/StringScanner.cpp
     src/Core/ThreatAssessor.cpp
@@ -104,6 +114,9 @@ target_link_libraries(KoltziTests PRIVATE
     Zydis
     shlwapi
     user32
+    bcrypt
+    wintrust
+    crypt32
 )
 
 set_target_properties(Koltzi PROPERTIES
