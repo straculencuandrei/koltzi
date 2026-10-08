@@ -14,10 +14,10 @@ Koltzi is an offline Windows desktop utility designed for sub-100ms triage of un
 
 The application couples two layers:
 1. **Low-Level Analysis Core:** Bare-metal C++20, zero-copy memory-mapped file I/O (`CreateFileMappingW` / `MapViewOfFile`), linear instruction decoding via Zydis, and lookup-table Shannon entropy calculation.
-2. **User Interface:** A borderless desktop companion rendered via Direct2D/DirectWrite with per-pixel alpha transparency that analyzes dropped binaries and presents plain-English threat assessments alongside an expandable technical HUD.
+2. **User Interface:** A native hardware-accelerated desktop application window rendered via Direct2D/DirectWrite (`WS_OVERLAPPEDWINDOW` with minimize, maximize, and full-screen controls). Features an animated companion mascot and a comprehensive split-pane technical triage dashboard with no overlapping text.
 
-* **Single Standalone Binary:** Portable executable under **1.05 MB** (static CRT `/MT`, zero external runtime dependencies).
-* **Memory Footprint:** Idle memory usage below **10 MB RAM**.
+* **Single Standalone Binary:** Portable executable under **1.1 MB** (static CRT `/MT`, zero external runtime dependencies).
+* **Memory Footprint:** Idle memory usage below **12 MB RAM**.
 * **Analysis Latency:** Under 15 ms on typical binaries (verified on Windows system binaries).
 * **Offline Privacy:** Zero cloud telemetry, zero network calls.
 
@@ -90,19 +90,15 @@ The resulting binary `build_rel/Koltzi.exe` is:
 ## 5. Controls & Interaction
 
 ### Graphical Mode
-* **Drag-and-Drop:** Drag any PE binary (`.exe`, `.dll`, `.sys`) onto the companion window. Triage runs asynchronously on a dedicated worker thread (`std::jthread`), ensuring the 60 FPS animation loop is never blocked.
-* **Repositioning:** Left-click and drag the companion to reposition it on the screen.
-* **Expand Technical Findings HUD:** Left-click the speech bubble or press `Tab`/`Space` to expand low-level details (section table, entropy gauges, threat meter, and detection breakdown).
-* **Right-Click Context Menu:**
-  * Analyze PE Binary File... (native open file dialog)
-  * Test Profile: Clean PE (Standard Imports)
-  * Test Profile: High Entropy / Packed Code
-  * Test Profile: Direct Syscalls + PEB Hashing
-  * Test Profile: Credential Scraping Artifacts
-  * Test Profile: Process Injection Chain
-  * Toggle Technical Findings HUD
-  * Reset Mascot to Idle
-  * Exit Koltzi
+* **Standard Window Controls:** Native title bar with Minimize, Maximize / Full-Screen, and Close buttons (`WS_OVERLAPPEDWINDOW`). Fully resizable from 880x580 up to multi-monitor 4K with hardware-accelerated Direct2D scaling.
+* **Toolbar Actions:** Clickable top toolbar buttons:
+  * `[Open PE File...]` native file picker
+  * Quick Malware Profiles: `[Clean PE]`, `[Packed]`, `[Syscall+PEB]`, `[Cred Stealer]`, `[Injection]`
+* **Drag-and-Drop:** Drag any PE binary (`.exe`, `.dll`, `.sys`) directly into the window or onto the dedicated drop zone card. Triage executes asynchronously on a background worker thread (`std::jthread`), maintaining a locked 60 FPS animation loop.
+* **Split-Pane Dashboard:**
+  * **Left Pane:** Animated companion mascot reacting to threat mood, status badge, personality dialogue card, and drop target.
+  * **Right Pane:** Low-level static telemetry dashboard including Target Overview, Threat Score progress meter, Shannon Entropy gauge, discrete Section Breakdown table, and detailed heuristic detections (Syscalls, PEB/TEB access, API hashing loops, Process injection primitives).
+* **Right-Click Context Menu:** Context menu available anywhere within the window.
 
 ### CLI / Headless Triage Mode
 ```powershell

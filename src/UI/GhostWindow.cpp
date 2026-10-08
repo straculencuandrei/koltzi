@@ -1,4 +1,6 @@
 #include "GhostWindow.h"
+#include <algorithm>
+#include <format>
 
 namespace Koltzi {
 
@@ -28,25 +30,26 @@ bool GhostWindow::Create() {
     WNDCLASSEXW wc = { sizeof(WNDCLASSEXW) };
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hInstance;
-    wc.lpszClassName = L"KoltziGhostWindowClass";
+    wc.lpszClassName = L"KoltziMainWindowClass";
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
     wc.style = CS_HREDRAW | CS_VREDRAW;
     RegisterClassExW(&wc);
 
-    // Initial position: Bottom right of screen workarea
+    // Initial position: Centered on screen
     RECT workArea;
     SystemParametersInfo(SPI_GETWORKAREA, 0, &workArea, 0);
-    m_posX = workArea.right - m_width - 40;
-    m_posY = workArea.bottom - m_height - 60;
-    if (m_posX < 20) m_posX = 20;
-    if (m_posY < 20) m_posY = 20;
+    int posX = (workArea.right - workArea.left - m_width) / 2;
+    int posY = (workArea.bottom - workArea.top - m_height) / 2;
+    if (posX < 20) posX = 20;
+    if (posY < 20) posY = 20;
 
     m_hwnd = CreateWindowExW(
-        WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_ACCEPTFILES | WS_EX_TOOLWINDOW,
+        WS_EX_ACCEPTFILES,
         wc.lpszClassName,
-        L"Koltzi - Ghost Triage Companion",
-        WS_POPUP,
-        m_posX, m_posY, m_width, m_height,
+        L"Koltzi - Malware Triage Agent",
+        WS_OVERLAPPEDWINDOW,
+        posX, posY, m_width, m_height,
         nullptr, nullptr, hInstance, this
     );
 
@@ -84,6 +87,14 @@ void GhostWindow::Destroy() {
         m_hwnd = NULL;
     }
     DiscardDeviceResources();
+    SafeRelease(m_titleFormat);
+    SafeRelease(m_subtitleFormat);
+    SafeRelease(m_headingFormat);
+    SafeRelease(m_subheadingFormat);
+    SafeRelease(m_bodyFormat);
+    SafeRelease(m_codeFormat);
+    SafeRelease(m_badgeFormat);
+    SafeRelease(m_buttonFormat);
     SafeRelease(m_dwriteFactory);
     SafeRelease(m_d2dFactory);
 }
@@ -97,42 +108,104 @@ bool GhostWindow::CreateDeviceIndependentResources() {
         __uuidof(IDWriteFactory),
         reinterpret_cast<IUnknown**>(&m_dwriteFactory)
     );
-    return SUCCEEDED(hr);
+    if (FAILED(hr)) return false;
+
+    m_dwriteFactory->CreateTextFormat(
+        L"Segoe UI", nullptr,
+        DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        15.0f, L"en-us", &m_titleFormat
+    );
+
+    m_dwriteFactory->CreateTextFormat(
+        L"Segoe UI", nullptr,
+        DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        10.5f, L"en-us", &m_subtitleFormat
+    );
+
+    m_dwriteFactory->CreateTextFormat(
+        L"Segoe UI", nullptr,
+        DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        13.0f, L"en-us", &m_headingFormat
+    );
+
+    m_dwriteFactory->CreateTextFormat(
+        L"Segoe UI", nullptr,
+        DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        11.0f, L"en-us", &m_subheadingFormat
+    );
+
+    m_dwriteFactory->CreateTextFormat(
+        L"Segoe UI", nullptr,
+        DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        12.0f, L"en-us", &m_bodyFormat
+    );
+
+    m_dwriteFactory->CreateTextFormat(
+        L"Consolas", nullptr,
+        DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        10.5f, L"en-us", &m_codeFormat
+    );
+
+    m_dwriteFactory->CreateTextFormat(
+        L"Segoe UI", nullptr,
+        DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        10.0f, L"en-us", &m_badgeFormat
+    );
+
+    m_dwriteFactory->CreateTextFormat(
+        L"Segoe UI", nullptr,
+        DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        10.5f, L"en-us", &m_buttonFormat
+    );
+
+    return true;
 }
 
 bool GhostWindow::CreateDeviceResources() {
-    if (!m_d2dFactory || !m_dwriteFactory) return false;
+    if (!m_d2dFactory || !m_dwriteFactory || !m_hwnd) return false;
 
-    HDC hdcScreen = GetDC(nullptr);
-    m_hMemDC = CreateCompatibleDC(hdcScreen);
+    if (!m_renderTarget) {
+        RECT rc;
+        GetClientRect(m_hwnd, &rc);
+        m_width = rc.right - rc.left;
+        m_height = rc.bottom - rc.top;
+        if (m_width < 100) m_width = 1140;
+        if (m_height < 100) m_height = 760;
 
-    BITMAPINFO bmi = {};
-    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-    bmi.bmiHeader.biWidth = m_width;
-    bmi.bmiHeader.biHeight = -m_height; // Top-down
-    bmi.bmiHeader.biPlanes = 1;
-    bmi.bmiHeader.biBitCount = 32;
-    bmi.bmiHeader.biCompression = BI_RGB;
+        D2D1_RENDER_TARGET_PROPERTIES rtProps = D2D1::RenderTargetProperties(
+            D2D1_RENDER_TARGET_TYPE_DEFAULT,
+            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_IGNORE),
+            0, 0,
+            D2D1_RENDER_TARGET_USAGE_NONE,
+            D2D1_FEATURE_LEVEL_DEFAULT
+        );
 
-    m_hBitmap = CreateDIBSection(m_hMemDC, &bmi, DIB_RGB_COLORS, &m_pBits, nullptr, 0);
-    ReleaseDC(nullptr, hdcScreen);
+        D2D1_HWND_RENDER_TARGET_PROPERTIES hwndProps = D2D1::HwndRenderTargetProperties(
+            m_hwnd,
+            D2D1::SizeU(m_width, m_height),
+            D2D1_PRESENT_OPTIONS_IMMEDIATELY
+        );
 
-    if (!m_hBitmap) return false;
-    m_hOldBitmap = static_cast<HBITMAP>(SelectObject(m_hMemDC, m_hBitmap));
+        HRESULT hr = m_d2dFactory->CreateHwndRenderTarget(&rtProps, &hwndProps, &m_renderTarget);
+        if (FAILED(hr)) return false;
 
-    D2D1_RENDER_TARGET_PROPERTIES props = D2D1::RenderTargetProperties(
-        D2D1_RENDER_TARGET_TYPE_DEFAULT,
-        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED),
-        0, 0,
-        D2D1_RENDER_TARGET_USAGE_NONE,
-        D2D1_FEATURE_LEVEL_DEFAULT
-    );
+        m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0.06f, 0.08f, 0.11f, 1.0f), &m_bgBrush);
+        m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0.09f, 0.11f, 0.16f, 1.0f), &m_panelBgBrush);
+        m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0.18f, 0.22f, 0.30f, 1.0f), &m_panelBorderBrush);
+        m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0.12f, 0.15f, 0.21f, 1.0f), &m_cardBgBrush);
+        m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0.95f, 0.97f, 1.00f, 1.0f), &m_textWhiteBrush);
+        m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0.60f, 0.67f, 0.76f, 1.0f), &m_textMutedBrush);
+        m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0.40f, 0.46f, 0.54f, 1.0f), &m_textDimBrush);
+        m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0.22f, 0.74f, 0.97f, 1.0f), &m_accentBrush);
+        m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0.94f, 0.27f, 0.27f, 1.0f), &m_redBrush);
+        m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0.96f, 0.62f, 0.04f, 1.0f), &m_yellowBrush);
+        m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0.06f, 0.73f, 0.51f, 1.0f), &m_greenBrush);
+        m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0.13f, 0.17f, 0.24f, 1.0f), &m_buttonBgBrush);
+        m_renderTarget->CreateSolidColorBrush(D2D1::ColorF(0.20f, 0.26f, 0.36f, 1.0f), &m_buttonHoverBrush);
 
-    HRESULT hr = m_d2dFactory->CreateDCRenderTarget(&props, &m_dcRenderTarget);
-    if (FAILED(hr)) return false;
-
-    m_ghostRenderer.Initialize(m_dcRenderTarget, m_dwriteFactory);
-    m_speechBubble.Initialize(m_dcRenderTarget, m_dwriteFactory);
+        m_ghostRenderer.Initialize(m_renderTarget, m_dwriteFactory);
+        m_speechBubble.Initialize(m_renderTarget, m_dwriteFactory);
+    }
 
     return true;
 }
@@ -140,21 +213,22 @@ bool GhostWindow::CreateDeviceResources() {
 void GhostWindow::DiscardDeviceResources() {
     m_ghostRenderer.DiscardDeviceResources();
     m_speechBubble.DiscardDeviceResources();
-    SafeRelease(m_dcRenderTarget);
 
-    if (m_hMemDC) {
-        if (m_hOldBitmap) {
-            SelectObject(m_hMemDC, m_hOldBitmap);
-            m_hOldBitmap = NULL;
-        }
-        DeleteDC(m_hMemDC);
-        m_hMemDC = NULL;
-    }
+    SafeRelease(m_bgBrush);
+    SafeRelease(m_panelBgBrush);
+    SafeRelease(m_panelBorderBrush);
+    SafeRelease(m_cardBgBrush);
+    SafeRelease(m_textWhiteBrush);
+    SafeRelease(m_textMutedBrush);
+    SafeRelease(m_textDimBrush);
+    SafeRelease(m_accentBrush);
+    SafeRelease(m_redBrush);
+    SafeRelease(m_yellowBrush);
+    SafeRelease(m_greenBrush);
+    SafeRelease(m_buttonBgBrush);
+    SafeRelease(m_buttonHoverBrush);
 
-    if (m_hBitmap) {
-        DeleteObject(m_hBitmap);
-        m_hBitmap = NULL;
-    }
+    SafeRelease(m_renderTarget);
 }
 
 void GhostWindow::SetReport(std::shared_ptr<TriageReport> report) {
@@ -163,14 +237,17 @@ void GhostWindow::SetReport(std::shared_ptr<TriageReport> report) {
         SetMood(report->mood);
         SetDialogue(report->personalityDialogue, false);
     }
+    if (m_hwnd) InvalidateRect(m_hwnd, nullptr, FALSE);
 }
 
 void GhostWindow::SetMood(GhostMood mood) {
     m_currentMood = mood;
+    if (m_hwnd) InvalidateRect(m_hwnd, nullptr, FALSE);
 }
 
 void GhostWindow::SetDialogue(const std::string& text, bool immediate) {
     m_speechBubble.SetDialogue(text, immediate);
+    if (m_hwnd) InvalidateRect(m_hwnd, nullptr, FALSE);
 }
 
 void GhostWindow::ToggleHUD() {
@@ -183,52 +260,468 @@ void GhostWindow::Update(float dt) {
 }
 
 void GhostWindow::Render() {
-    if (!m_dcRenderTarget || !m_hMemDC || !m_hwnd) return;
+    if (!CreateDeviceResources() || !m_renderTarget) return;
 
-    RECT rect = { 0, 0, m_width, m_height };
-    HRESULT hr = m_dcRenderTarget->BindDC(m_hMemDC, &rect);
-    if (FAILED(hr)) {
-        DiscardDeviceResources();
-        CreateDeviceResources();
-        return;
-    }
+    m_renderTarget->BeginDraw();
+    m_renderTarget->Clear(D2D1::ColorF(0.06f, 0.08f, 0.11f, 1.0f)); // Solid obsidian
 
-    m_dcRenderTarget->BeginDraw();
-    m_dcRenderTarget->Clear(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.0f)); // Transparent
+    RenderTopHeader(m_renderTarget);
+    RenderLeftPanel(m_renderTarget);
+    RenderRightDashboard(m_renderTarget);
+    RenderFooter(m_renderTarget);
 
-    // Ghost center coordinates: (100, 160)
-    m_ghostRenderer.Render(m_dcRenderTarget, 100.0f, 160.0f);
-
-    // Speech bubble & HUD
-    m_speechBubble.Render(m_dcRenderTarget, m_currentReport.get(), m_currentMood);
-
-    hr = m_dcRenderTarget->EndDraw();
+    HRESULT hr = m_renderTarget->EndDraw();
     if (hr == D2DERR_RECREATE_TARGET) {
         DiscardDeviceResources();
-        CreateDeviceResources();
-        return;
+    }
+}
+
+void GhostWindow::RenderTopHeader(ID2D1RenderTarget* rt) {
+    float headerH = 54.0f;
+    D2D1_RECT_F headerRect = D2D1::RectF(0.0f, 0.0f, static_cast<float>(m_width), headerH);
+
+    // Header Background
+    if (m_panelBgBrush) {
+        rt->FillRectangle(headerRect, m_panelBgBrush);
+    }
+    if (m_panelBorderBrush) {
+        rt->DrawLine(
+            D2D1::Point2F(0.0f, headerH),
+            D2D1::Point2F(static_cast<float>(m_width), headerH),
+            m_panelBorderBrush, 1.0f
+        );
     }
 
-    // Update Windows Layered Window with per-pixel alpha
-    HDC hdcScreen = GetDC(nullptr);
-    POINT ptSrc = { 0, 0 };
-    POINT ptPos = { m_posX, m_posY };
-    SIZE sizeWnd = { m_width, m_height };
-    BLENDFUNCTION blend = { AC_SRC_OVER, 0, 255, AC_SRC_ALPHA };
+    // Left Branding
+    if (m_accentBrush && m_titleFormat) {
+        std::wstring title = L"KOLTZI";
+        rt->DrawText(title.c_str(), (UINT32)title.size(), m_titleFormat, D2D1::RectF(18.0f, 14.0f, 110.0f, 44.0f), m_accentBrush);
+    }
+    if (m_textMutedBrush && m_subtitleFormat) {
+        std::wstring sub = L"// OFFLINE PE STATIC TRIAGE";
+        rt->DrawText(sub.c_str(), (UINT32)sub.size(), m_subtitleFormat, D2D1::RectF(95.0f, 18.0f, 320.0f, 44.0f), m_textMutedBrush);
+    }
 
-    UpdateLayeredWindow(
-        m_hwnd,
-        hdcScreen,
-        &ptPos,
-        &sizeWnd,
-        m_hMemDC,
-        &ptSrc,
-        0,
-        &blend,
-        ULW_ALPHA
-    );
+    // Setup Toolbar Buttons
+    m_buttons.clear();
+    float btnRight = static_cast<float>(m_width) - 16.0f;
+    float btnY = 12.0f;
+    float btnH = 30.0f;
 
-    ReleaseDC(nullptr, hdcScreen);
+    struct BtnDef { int id; std::wstring label; float width; };
+    std::vector<BtnDef> btnDefs = {
+        { IDM_SCAN_FILE, L"Open PE File...", 120.0f },
+        { IDM_SAMPLE_CLEAN, L"Clean PE", 85.0f },
+        { IDM_SAMPLE_PACKED, L"Packed", 75.0f },
+        { IDM_SAMPLE_SYSCALL_PEB, L"Syscall+PEB", 100.0f },
+        { IDM_SAMPLE_CRED_STEALER, L"Cred Stealer", 95.0f },
+        { IDM_SAMPLE_INJECTION, L"Injection", 85.0f }
+    };
+
+    // Layout buttons from right to left
+    for (int i = static_cast<int>(btnDefs.size()) - 1; i >= 0; --i) {
+        float btnW = btnDefs[i].width;
+        float btnX = btnRight - btnW;
+        ToolbarButton tb;
+        tb.id = btnDefs[i].id;
+        tb.label = btnDefs[i].label;
+        tb.rect = D2D1::RectF(btnX, btnY, btnRight, btnY + btnH);
+        m_buttons.push_back(tb);
+        btnRight = btnX - 8.0f;
+    }
+
+    // Draw buttons
+    for (size_t i = 0; i < m_buttons.size(); ++i) {
+        const auto& b = m_buttons[i];
+        bool isHover = (m_hoveredButton == b.id);
+        D2D1_ROUNDED_RECT rrect = D2D1::RoundedRect(b.rect, 5.0f, 5.0f);
+
+        ID2D1SolidColorBrush* bg = isHover ? m_buttonHoverBrush : m_buttonBgBrush;
+        if (bg) rt->FillRoundedRectangle(rrect, bg);
+
+        ID2D1SolidColorBrush* border = isHover ? m_accentBrush : m_panelBorderBrush;
+        if (border) rt->DrawRoundedRectangle(rrect, border, isHover ? 1.5f : 1.0f);
+
+        ID2D1SolidColorBrush* txt = isHover ? m_textWhiteBrush : m_textMutedBrush;
+        if (txt && m_buttonFormat) {
+            DWRITE_TEXT_ALIGNMENT oldAlign = m_buttonFormat->GetTextAlignment();
+            m_buttonFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+            rt->DrawText(b.label.c_str(), (UINT32)b.label.size(), m_buttonFormat,
+                D2D1::RectF(b.rect.left, b.rect.top + 5.0f, b.rect.right, b.rect.bottom), txt);
+            m_buttonFormat->SetTextAlignment(oldAlign);
+        }
+    }
+}
+
+void GhostWindow::RenderLeftPanel(ID2D1RenderTarget* rt) {
+    float panelX = 16.0f;
+    float panelY = 68.0f;
+    float panelW = 320.0f;
+    float panelH = static_cast<float>(m_height) - panelY - 38.0f;
+
+    D2D1_ROUNDED_RECT panelRect = D2D1::RoundedRect(D2D1::RectF(panelX, panelY, panelX + panelW, panelY + panelH), 10.0f, 10.0f);
+
+    if (m_panelBgBrush) rt->FillRoundedRectangle(panelRect, m_panelBgBrush);
+    if (m_panelBorderBrush) rt->DrawRoundedRectangle(panelRect, m_panelBorderBrush, 1.0f);
+
+    // 1. Mascot Stage
+    float cx = panelX + panelW * 0.5f;
+    float cy = panelY + 105.0f;
+
+    // Ambient radar pedestal rings
+    if (m_panelBorderBrush) {
+        rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy + 45.0f), 65.0f, 18.0f), m_panelBorderBrush, 1.0f);
+        rt->DrawEllipse(D2D1::Ellipse(D2D1::Point2F(cx, cy + 45.0f), 85.0f, 24.0f), m_panelBorderBrush, 1.0f);
+    }
+
+    // Render Animated Ghost Mascot
+    m_ghostRenderer.Render(rt, cx, cy);
+
+    // 2. Dialogue Speech Card
+    D2D1_RECT_F dialogueRect = D2D1::RectF(panelX + 14.0f, panelY + 205.0f, panelX + panelW - 14.0f, panelY + 390.0f);
+    m_speechBubble.RenderAt(rt, dialogueRect, m_currentMood);
+
+    // 3. Drop Zone Card
+    float dropY = panelY + 405.0f;
+    float dropH = panelH - (dropY - panelY) - 14.0f;
+    if (dropH > 60.0f) {
+        m_dropZoneRect = D2D1::RectF(panelX + 14.0f, dropY, panelX + panelW - 14.0f, dropY + dropH);
+        D2D1_ROUNDED_RECT dropRRect = D2D1::RoundedRect(m_dropZoneRect, 8.0f, 8.0f);
+
+        ID2D1SolidColorBrush* dropBg = m_dropHover ? m_buttonHoverBrush : m_cardBgBrush;
+        if (dropBg) rt->FillRoundedRectangle(dropRRect, dropBg);
+
+        ID2D1SolidColorBrush* dropBorder = m_dropHover ? m_accentBrush : m_panelBorderBrush;
+        if (dropBorder) rt->DrawRoundedRectangle(dropRRect, dropBorder, m_dropHover ? 2.0f : 1.0f);
+
+        if (m_headingFormat && m_textWhiteBrush) {
+            std::wstring dropTitle = L"[ DROP PE BINARY HERE ]";
+            DWRITE_TEXT_ALIGNMENT old = m_headingFormat->GetTextAlignment();
+            m_headingFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+            rt->DrawText(dropTitle.c_str(), (UINT32)dropTitle.size(), m_headingFormat,
+                D2D1::RectF(m_dropZoneRect.left, m_dropZoneRect.top + 16.0f, m_dropZoneRect.right, m_dropZoneRect.top + 40.0f),
+                m_accentBrush ? m_accentBrush : m_textWhiteBrush);
+            m_headingFormat->SetTextAlignment(old);
+        }
+
+        if (m_subtitleFormat && m_textMutedBrush) {
+            std::wstring dropDesc = L"Drag & drop .exe / .dll / .sys\nor click to browse files";
+            DWRITE_TEXT_ALIGNMENT old = m_subtitleFormat->GetTextAlignment();
+            m_subtitleFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+            rt->DrawText(dropDesc.c_str(), (UINT32)dropDesc.size(), m_subtitleFormat,
+                D2D1::RectF(m_dropZoneRect.left, m_dropZoneRect.top + 42.0f, m_dropZoneRect.right, m_dropZoneRect.bottom),
+                m_textMutedBrush);
+            m_subtitleFormat->SetTextAlignment(old);
+        }
+    }
+}
+
+void GhostWindow::RenderRightDashboard(ID2D1RenderTarget* rt) {
+    float dashX = 352.0f;
+    float dashY = 68.0f;
+    float dashW = static_cast<float>(m_width) - dashX - 16.0f;
+    float dashH = static_cast<float>(m_height) - dashY - 38.0f;
+
+    if (dashW < 200.0f || dashH < 200.0f) return;
+
+    // --- CARD 1: Binary Overview & Threat Meters ---
+    float card1H = 150.0f;
+    D2D1_ROUNDED_RECT card1Rect = D2D1::RoundedRect(D2D1::RectF(dashX, dashY, dashX + dashW, dashY + card1H), 10.0f, 10.0f);
+    if (m_panelBgBrush) rt->FillRoundedRectangle(card1Rect, m_panelBgBrush);
+    if (m_panelBorderBrush) rt->DrawRoundedRectangle(card1Rect, m_panelBorderBrush, 1.0f);
+
+    if (m_currentReport && m_currentReport->parseSuccess) {
+        // Line 1: File Name + Latency Pill
+        std::wstring fileName = Utf8ToWide(m_currentReport->fileName);
+        if (m_titleFormat && m_textWhiteBrush) {
+            rt->DrawText(fileName.c_str(), (UINT32)fileName.size(), m_titleFormat,
+                D2D1::RectF(dashX + 16.0f, dashY + 12.0f, dashX + dashW - 130.0f, dashY + 36.0f), m_textWhiteBrush);
+        }
+
+        // Latency Badge
+        std::wstring latency = std::format(L"{:.1f} ms", m_currentReport->analysisTimeMs);
+        D2D1_ROUNDED_RECT latRect = D2D1::RoundedRect(D2D1::RectF(dashX + dashW - 110.0f, dashY + 12.0f, dashX + dashW - 16.0f, dashY + 34.0f), 4.0f, 4.0f);
+        if (m_cardBgBrush) rt->FillRoundedRectangle(latRect, m_cardBgBrush);
+        if (m_greenBrush) rt->DrawRoundedRectangle(latRect, m_greenBrush, 1.0f);
+        if (m_badgeFormat && m_greenBrush) {
+            DWRITE_TEXT_ALIGNMENT old = m_badgeFormat->GetTextAlignment();
+            m_badgeFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+            rt->DrawText(latency.c_str(), (UINT32)latency.size(), m_badgeFormat,
+                D2D1::RectF(latRect.rect.left, latRect.rect.top + 3.0f, latRect.rect.right, latRect.rect.bottom), m_greenBrush);
+            m_badgeFormat->SetTextAlignment(old);
+        }
+
+        // Line 2: Target File Path
+        std::wstring filePath = m_currentReport->filePath;
+        if (filePath.empty()) filePath = fileName;
+        if (m_codeFormat && m_textDimBrush) {
+            rt->DrawText(filePath.c_str(), (UINT32)filePath.size(), m_codeFormat,
+                D2D1::RectF(dashX + 16.0f, dashY + 38.0f, dashX + dashW - 16.0f, dashY + 54.0f), m_textDimBrush);
+        }
+
+        // Line 3: 4 Metric Badges
+        float chipW = (dashW - 32.0f - 30.0f) / 4.0f;
+        float chipY = dashY + 58.0f;
+        float chipH = 34.0f;
+
+        struct MetricChip { std::wstring label; std::wstring value; };
+        std::vector<MetricChip> chips = {
+            { L"ARCH", Utf8ToWide(m_currentReport->machineType) },
+            { L"SUBSYSTEM", Utf8ToWide(m_currentReport->subsystem) },
+            { L"FILE SIZE", Utf8ToWide(FormatFileSize(m_currentReport->fileSize)) },
+            { L"IMPORTS", std::to_wstring(m_currentReport->imports.size()) + L" DLLs" }
+        };
+
+        for (size_t i = 0; i < chips.size(); ++i) {
+            float cX = dashX + 16.0f + i * (chipW + 10.0f);
+            D2D1_ROUNDED_RECT cRect = D2D1::RoundedRect(D2D1::RectF(cX, chipY, cX + chipW, chipY + chipH), 5.0f, 5.0f);
+            if (m_cardBgBrush) rt->FillRoundedRectangle(cRect, m_cardBgBrush);
+            if (m_panelBorderBrush) rt->DrawRoundedRectangle(cRect, m_panelBorderBrush, 1.0f);
+
+            if (m_badgeFormat && m_textDimBrush) {
+                rt->DrawText(chips[i].label.c_str(), (UINT32)chips[i].label.size(), m_badgeFormat,
+                    D2D1::RectF(cX + 8.0f, chipY + 2.0f, cX + chipW - 4.0f, chipY + 16.0f), m_textDimBrush);
+            }
+            if (m_subheadingFormat && m_textWhiteBrush) {
+                rt->DrawText(chips[i].value.c_str(), (UINT32)chips[i].value.size(), m_subheadingFormat,
+                    D2D1::RectF(cX + 8.0f, chipY + 15.0f, cX + chipW - 4.0f, chipY + 32.0f), m_textWhiteBrush);
+            }
+        }
+
+        // Line 4: Threat Score Meter & Overall Entropy Meter
+        float meterY = dashY + 102.0f;
+        float halfW = (dashW - 32.0f - 20.0f) * 0.5f;
+
+        // Threat Score Meter
+        std::wstring threatLabel = std::format(L"Threat Score: {} / 100 [{}]",
+            m_currentReport->threatScore,
+            (m_currentReport->threatScore >= 60 ? L"MALICIOUS" : m_currentReport->threatScore >= 30 ? L"SUSPICIOUS" : L"CLEAN"));
+
+        ID2D1SolidColorBrush* threatColor = (m_currentReport->threatScore >= 60) ? m_redBrush :
+                                            (m_currentReport->threatScore >= 30) ? m_yellowBrush : m_greenBrush;
+
+        if (m_badgeFormat && threatColor) {
+            rt->DrawText(threatLabel.c_str(), (UINT32)threatLabel.size(), m_badgeFormat,
+                D2D1::RectF(dashX + 16.0f, meterY, dashX + 16.0f + halfW, meterY + 16.0f), threatColor);
+        }
+
+        D2D1_ROUNDED_RECT tTrack = D2D1::RoundedRect(D2D1::RectF(dashX + 16.0f, meterY + 18.0f, dashX + 16.0f + halfW, meterY + 26.0f), 3.0f, 3.0f);
+        if (m_cardBgBrush) rt->FillRoundedRectangle(tTrack, m_cardBgBrush);
+        float tFillW = halfW * (static_cast<float>(m_currentReport->threatScore) / 100.0f);
+        if (tFillW > 3.0f && threatColor) {
+            D2D1_ROUNDED_RECT tFill = D2D1::RoundedRect(D2D1::RectF(dashX + 16.0f, meterY + 18.0f, dashX + 16.0f + tFillW, meterY + 26.0f), 3.0f, 3.0f);
+            rt->FillRoundedRectangle(tFill, threatColor);
+        }
+
+        // Entropy Meter
+        float entX = dashX + 16.0f + halfW + 20.0f;
+        std::wstring entLabel = std::format(L"Overall Shannon Entropy: {:.2f} / 8.00 (Threshold: 7.20)", m_currentReport->overallEntropy);
+        ID2D1SolidColorBrush* entColor = (m_currentReport->overallEntropy > 7.2f) ? m_yellowBrush : m_accentBrush;
+
+        if (m_badgeFormat && entColor) {
+            rt->DrawText(entLabel.c_str(), (UINT32)entLabel.size(), m_badgeFormat,
+                D2D1::RectF(entX, meterY, entX + halfW, meterY + 16.0f), entColor);
+        }
+
+        D2D1_ROUNDED_RECT eTrack = D2D1::RoundedRect(D2D1::RectF(entX, meterY + 18.0f, entX + halfW, meterY + 26.0f), 3.0f, 3.0f);
+        if (m_cardBgBrush) rt->FillRoundedRectangle(eTrack, m_cardBgBrush);
+        float eFillW = halfW * std::min(1.0f, static_cast<float>(m_currentReport->overallEntropy) / 8.0f);
+        if (eFillW > 3.0f && entColor) {
+            D2D1_ROUNDED_RECT eFill = D2D1::RoundedRect(D2D1::RectF(entX, meterY + 18.0f, entX + eFillW, meterY + 26.0f), 3.0f, 3.0f);
+            rt->FillRoundedRectangle(eFill, entColor);
+        }
+
+    } else {
+        // Empty State Banner
+        if (m_headingFormat && m_textWhiteBrush) {
+            std::wstring emptyTitle = L"READY FOR ANALYSIS // NO BINARY LOADED";
+            rt->DrawText(emptyTitle.c_str(), (UINT32)emptyTitle.size(), m_headingFormat,
+                D2D1::RectF(dashX + 16.0f, dashY + 25.0f, dashX + dashW - 16.0f, dashY + 50.0f), m_textWhiteBrush);
+        }
+        if (m_bodyFormat && m_textMutedBrush) {
+            std::wstring emptyBody = L"Drag and drop an executable (.exe, .dll, .sys) into Koltzi or select a malware profile above to begin offline triage.\n"
+                                     L"Heuristics inspect direct syscalls, manual PEB traversal, Shannon entropy, and cross-process injection chains.";
+            rt->DrawText(emptyBody.c_str(), (UINT32)emptyBody.size(), m_bodyFormat,
+                D2D1::RectF(dashX + 16.0f, dashY + 55.0f, dashX + dashW - 16.0f, dashY + 120.0f), m_textMutedBrush);
+        }
+    }
+
+    // --- CARD 2: Section Breakdown Table ---
+    float card2Y = dashY + card1H + 12.0f;
+    float card2H = 200.0f;
+    D2D1_ROUNDED_RECT card2Rect = D2D1::RoundedRect(D2D1::RectF(dashX, card2Y, dashX + dashW, card2Y + card2H), 10.0f, 10.0f);
+    if (m_panelBgBrush) rt->FillRoundedRectangle(card2Rect, m_panelBgBrush);
+    if (m_panelBorderBrush) rt->DrawRoundedRectangle(card2Rect, m_panelBorderBrush, 1.0f);
+
+    // Header Title
+    std::wstring card2Title = L"PE SECTION TABLE & SHANNON ENTROPY (256-BIN LOOKUP)";
+    if (m_subheadingFormat && m_accentBrush) {
+        rt->DrawText(card2Title.c_str(), (UINT32)card2Title.size(), m_subheadingFormat,
+            D2D1::RectF(dashX + 16.0f, card2Y + 10.0f, dashX + dashW - 16.0f, card2Y + 28.0f), m_accentBrush);
+    }
+
+    // Table Column Headers
+    float tableY = card2Y + 34.0f;
+    float colNameW = 100.0f;
+    float colVSizeW = 110.0f;
+    float colRSizeW = 110.0f;
+    float colEntW = 180.0f;
+
+    float col1 = dashX + 16.0f;
+    float col2 = col1 + colNameW;
+    float col3 = col2 + colVSizeW;
+    float col4 = col3 + colRSizeW;
+    float col5 = col4 + colEntW;
+
+    if (m_codeFormat && m_textDimBrush) {
+        rt->DrawText(L"SECTION", 7, m_codeFormat, D2D1::RectF(col1, tableY, col2, tableY + 18.0f), m_textDimBrush);
+        rt->DrawText(L"VIRT_SIZE", 9, m_codeFormat, D2D1::RectF(col2, tableY, col3, tableY + 18.0f), m_textDimBrush);
+        rt->DrawText(L"RAW_SIZE", 8, m_codeFormat, D2D1::RectF(col3, tableY, col4, tableY + 18.0f), m_textDimBrush);
+        rt->DrawText(L"ENTROPY (0 - 8.0)", 17, m_codeFormat, D2D1::RectF(col4, tableY, col5, tableY + 18.0f), m_textDimBrush);
+        rt->DrawText(L"VERDICT / FLAGS", 15, m_codeFormat, D2D1::RectF(col5, tableY, dashX + dashW - 16.0f, tableY + 18.0f), m_textDimBrush);
+    }
+
+    // Divider line
+    if (m_panelBorderBrush) {
+        rt->DrawLine(D2D1::Point2F(dashX + 16.0f, tableY + 19.0f), D2D1::Point2F(dashX + dashW - 16.0f, tableY + 19.0f), m_panelBorderBrush, 1.0f);
+    }
+
+    // Rows
+    float rowY = tableY + 24.0f;
+    if (m_currentReport && !m_currentReport->sections.empty()) {
+        size_t maxRows = std::min<size_t>(m_currentReport->sections.size(), 6);
+        for (size_t i = 0; i < maxRows; ++i) {
+            const auto& sec = m_currentReport->sections[i];
+            std::wstring sName = Utf8ToWide(sec.name);
+            std::wstring sVSize = std::format(L"0x{:X}", sec.virtualSize);
+            std::wstring sRSize = std::format(L"{} B", sec.rawSize);
+            std::wstring sEnt = std::format(L"{:.2f}", sec.entropy);
+
+            // Alternate row background highlight
+            if (i % 2 == 1 && m_cardBgBrush) {
+                rt->FillRectangle(D2D1::RectF(col1 - 4.0f, rowY - 2.0f, dashX + dashW - 16.0f, rowY + 18.0f), m_cardBgBrush);
+            }
+
+            if (m_codeFormat && m_textWhiteBrush) {
+                rt->DrawText(sName.c_str(), (UINT32)sName.size(), m_codeFormat, D2D1::RectF(col1, rowY, col2, rowY + 18.0f), m_textWhiteBrush);
+            }
+            if (m_codeFormat && m_textMutedBrush) {
+                rt->DrawText(sVSize.c_str(), (UINT32)sVSize.size(), m_codeFormat, D2D1::RectF(col2, rowY, col3, rowY + 18.0f), m_textMutedBrush);
+                rt->DrawText(sRSize.c_str(), (UINT32)sRSize.size(), m_codeFormat, D2D1::RectF(col3, rowY, col4, rowY + 18.0f), m_textMutedBrush);
+            }
+
+            // Entropy Mini Progress Bar + Number
+            float barTotalW = 100.0f;
+            float barFilled = barTotalW * std::min(1.0f, static_cast<float>(sec.entropy) / 8.0f);
+            D2D1_ROUNDED_RECT miniTrack = D2D1::RoundedRect(D2D1::RectF(col4, rowY + 4.0f, col4 + barTotalW, rowY + 12.0f), 2.0f, 2.0f);
+            if (m_cardBgBrush) rt->FillRoundedRectangle(miniTrack, m_cardBgBrush);
+
+            ID2D1SolidColorBrush* secColor = (sec.entropy > 7.2f) ? m_yellowBrush : m_accentBrush;
+            if (secColor && barFilled > 2.0f) {
+                D2D1_ROUNDED_RECT miniFill = D2D1::RoundedRect(D2D1::RectF(col4, rowY + 4.0f, col4 + barFilled, rowY + 12.0f), 2.0f, 2.0f);
+                rt->FillRoundedRectangle(miniFill, secColor);
+            }
+            if (m_codeFormat && secColor) {
+                rt->DrawText(sEnt.c_str(), (UINT32)sEnt.size(), m_codeFormat, D2D1::RectF(col4 + barTotalW + 10.0f, rowY, col5, rowY + 18.0f), secColor);
+            }
+
+            // Flags / Verdict
+            std::wstring flagStr;
+            ID2D1SolidColorBrush* flagColor = m_textMutedBrush;
+            if (sec.isRwx) {
+                flagStr = L"[RWX VIOLATION]";
+                flagColor = m_redBrush;
+            } else if (sec.isSuspiciousEntropy) {
+                flagStr = L"[HIGH ENTROPY / PACKED]";
+                flagColor = m_yellowBrush;
+            } else {
+                flagStr = L"OK";
+                flagColor = m_greenBrush;
+            }
+
+            if (m_codeFormat && flagColor) {
+                rt->DrawText(flagStr.c_str(), (UINT32)flagStr.size(), m_codeFormat, D2D1::RectF(col5, rowY, dashX + dashW - 16.0f, rowY + 18.0f), flagColor);
+            }
+
+            rowY += 22.0f;
+        }
+    } else {
+        if (m_codeFormat && m_textDimBrush) {
+            std::wstring noSec = L"No section information available yet.";
+            rt->DrawText(noSec.c_str(), (UINT32)noSec.size(), m_codeFormat, D2D1::RectF(col1, rowY, dashX + dashW - 16.0f, rowY + 20.0f), m_textDimBrush);
+        }
+    }
+
+    // --- CARD 3: Reverse Engineering Findings & Heuristic Detections ---
+    float card3Y = card2Y + card2H + 12.0f;
+    float card3H = dashH - (card3Y - dashY);
+    if (card3H < 80.0f) card3H = 80.0f;
+
+    D2D1_ROUNDED_RECT card3Rect = D2D1::RoundedRect(D2D1::RectF(dashX, card3Y, dashX + dashW, card3Y + card3H), 10.0f, 10.0f);
+    if (m_panelBgBrush) rt->FillRoundedRectangle(card3Rect, m_panelBgBrush);
+    if (m_panelBorderBrush) rt->DrawRoundedRectangle(card3Rect, m_panelBorderBrush, 1.0f);
+
+    std::wstring card3Title = L"LOW-LEVEL HEURISTICS & REVERSE ENGINEERING FINDINGS";
+    if (m_subheadingFormat && m_accentBrush) {
+        rt->DrawText(card3Title.c_str(), (UINT32)card3Title.size(), m_subheadingFormat,
+            D2D1::RectF(dashX + 16.0f, card3Y + 10.0f, dashX + dashW - 16.0f, card3Y + 28.0f), m_accentBrush);
+    }
+
+    float findY = card3Y + 32.0f;
+    if (m_currentReport && !m_currentReport->technicalDetails.empty()) {
+        size_t maxFindings = static_cast<size_t>(std::max(1, static_cast<int>((card3H - 42.0f) / 20.0f)));
+        size_t count = std::min(m_currentReport->technicalDetails.size(), maxFindings);
+
+        for (size_t i = 0; i < count; ++i) {
+            const auto& detail = m_currentReport->technicalDetails[i];
+            std::wstring wDetail = Utf8ToWide(detail);
+
+            ID2D1SolidColorBrush* lineBrush = m_textMutedBrush;
+            if (detail.starts_with("[CRITICAL]")) {
+                lineBrush = m_redBrush;
+            } else if (detail.starts_with("[WARNING]")) {
+                lineBrush = m_yellowBrush;
+            } else if (detail.starts_with("[INFO]")) {
+                lineBrush = m_greenBrush;
+            }
+
+            if (m_codeFormat && lineBrush) {
+                rt->DrawText(wDetail.c_str(), (UINT32)wDetail.size(), m_codeFormat,
+                    D2D1::RectF(dashX + 16.0f, findY, dashX + dashW - 16.0f, findY + 18.0f), lineBrush);
+            }
+            findY += 20.0f;
+        }
+    } else {
+        if (m_codeFormat && m_textDimBrush) {
+            std::wstring noFindings = L"No heuristic red flags or warnings recorded.";
+            rt->DrawText(noFindings.c_str(), (UINT32)noFindings.size(), m_codeFormat,
+                D2D1::RectF(dashX + 16.0f, findY, dashX + dashW - 16.0f, findY + 20.0f), m_textDimBrush);
+        }
+    }
+}
+
+void GhostWindow::RenderFooter(ID2D1RenderTarget* rt) {
+    float footerH = 26.0f;
+    float footerY = static_cast<float>(m_height) - footerH;
+    D2D1_RECT_F footerRect = D2D1::RectF(0.0f, footerY, static_cast<float>(m_width), static_cast<float>(m_height));
+
+    if (m_bgBrush) rt->FillRectangle(footerRect, m_bgBrush);
+    if (m_panelBorderBrush) {
+        rt->DrawLine(D2D1::Point2F(0.0f, footerY), D2D1::Point2F(static_cast<float>(m_width), footerY), m_panelBorderBrush, 1.0f);
+    }
+
+    if (m_subtitleFormat && m_textDimBrush) {
+        std::wstring leftInfo = L"Koltzi Engine v1.0 | Offline Static PE Triage | Zero Telemetry | Static CRT /MT";
+        rt->DrawText(leftInfo.c_str(), (UINT32)leftInfo.size(), m_subtitleFormat,
+            D2D1::RectF(16.0f, footerY + 4.0f, 600.0f, static_cast<float>(m_height)), m_textDimBrush);
+
+        std::wstring rightInfo = std::format(L"Direct2D Hardware Accelerated | {} x {}", m_width, m_height);
+        DWRITE_TEXT_ALIGNMENT old = m_subtitleFormat->GetTextAlignment();
+        m_subtitleFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+        rt->DrawText(rightInfo.c_str(), (UINT32)rightInfo.size(), m_subtitleFormat,
+            D2D1::RectF(static_cast<float>(m_width) - 400.0f, footerY + 4.0f, static_cast<float>(m_width) - 16.0f, static_cast<float>(m_height)), m_textDimBrush);
+        m_subtitleFormat->SetTextAlignment(old);
+    }
 }
 
 void GhostWindow::ShowContextMenu(int screenX, int screenY) {
@@ -241,7 +734,6 @@ void GhostWindow::ShowContextMenu(int screenX, int screenY) {
     AppendMenuW(hMenu, MF_STRING, IDM_SAMPLE_CRED_STEALER, L"Test Profile: Credential Scraping Artifacts");
     AppendMenuW(hMenu, MF_STRING, IDM_SAMPLE_INJECTION, L"Test Profile: Process Injection Chain");
     AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(hMenu, MF_STRING, IDM_TOGGLE_HUD, m_speechBubble.IsExpanded() ? L"Collapse Technical HUD" : L"Expand Technical HUD");
     AppendMenuW(hMenu, MF_STRING, IDM_RESET, L"Reset Mascot to Idle");
     AppendMenuW(hMenu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(hMenu, MF_STRING, IDM_EXIT, L"Exit Koltzi");
@@ -258,9 +750,10 @@ void GhostWindow::ShowContextMenu(int screenX, int screenY) {
 LRESULT CALLBACK GhostWindow::WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     GhostWindow* pThis = nullptr;
     if (msg == WM_NCCREATE) {
-        auto cs = reinterpret_cast<CREATESTRUCT*>(lParam);
-        pThis = reinterpret_cast<GhostWindow*>(cs->lpCreateParams);
+        CREATESTRUCT* pCreate = reinterpret_cast<CREATESTRUCT*>(lParam);
+        pThis = reinterpret_cast<GhostWindow*>(pCreate->lpCreateParams);
         SetWindowLongPtr(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(pThis));
+        pThis->m_hwnd = hwnd;
     } else {
         pThis = reinterpret_cast<GhostWindow*>(GetWindowLongPtr(hwnd, GWLP_USERDATA));
     }
@@ -276,84 +769,111 @@ LRESULT GhostWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
     case WM_TIMER:
         if (wParam == TIMER_ANIMATION_ID) {
             Update(0.016f);
-            Render();
+            InvalidateRect(hwnd, nullptr, FALSE);
             return 0;
         }
         break;
 
-    case WM_DROPFILES: {
-        HDROP hDrop = reinterpret_cast<HDROP>(wParam);
-        UINT fileCount = DragQueryFileW(hDrop, 0xFFFFFFFF, nullptr, 0);
-        if (fileCount > 0) {
-            wchar_t filePath[MAX_PATH] = { 0 };
-            if (DragQueryFileW(hDrop, 0, filePath, MAX_PATH) > 0) {
-                if (m_onFileDrop) {
-                    m_onFileDrop(filePath);
-                }
-            }
-        }
-        DragFinish(hDrop);
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        BeginPaint(hwnd, &ps);
+        Render();
+        EndPaint(hwnd, &ps);
         return 0;
     }
 
-    case WM_LBUTTONDOWN: {
-        int mouseX = GET_X_LPARAM(lParam);
-        int mouseY = GET_Y_LPARAM(lParam);
+    case WM_ERASEBKGND:
+        return 1; // Direct2D handles full background rendering
 
-        // If clicked on speech bubble toggle area, toggle HUD
-        if (m_speechBubble.HitTest(static_cast<float>(mouseX), static_cast<float>(mouseY))) {
-            m_speechBubble.ToggleExpandedDetails();
-            Render();
-            return 0;
+    case WM_SIZE: {
+        UINT w = LOWORD(lParam);
+        UINT h = HIWORD(lParam);
+        if (w > 0 && h > 0) {
+            m_width = w;
+            m_height = h;
+            if (m_renderTarget) {
+                m_renderTarget->Resize(D2D1::SizeU(m_width, m_height));
+            }
+            InvalidateRect(hwnd, nullptr, FALSE);
         }
+        return 0;
+    }
 
-        // Otherwise begin window dragging
-        m_isDragging = true;
-        SetCapture(hwnd);
-        GetCursorPos(&m_dragStartPos);
-        m_dragStartWindowPos.x = m_posX;
-        m_dragStartWindowPos.y = m_posY;
+    case WM_GETMINMAXINFO: {
+        MINMAXINFO* mmi = reinterpret_cast<MINMAXINFO*>(lParam);
+        mmi->ptMinTrackSize.x = 880;
+        mmi->ptMinTrackSize.y = 580;
         return 0;
     }
 
     case WM_MOUSEMOVE: {
-        if (m_isDragging) {
-            POINT pt;
-            GetCursorPos(&pt);
-            int dx = pt.x - m_dragStartPos.x;
-            int dy = pt.y - m_dragStartPos.y;
-            m_posX = m_dragStartWindowPos.x + dx;
-            m_posY = m_dragStartWindowPos.y + dy;
-            Render();
+        float x = static_cast<float>(LOWORD(lParam));
+        float y = static_cast<float>(HIWORD(lParam));
+
+        int prevHover = m_hoveredButton;
+        m_hoveredButton = -1;
+        for (const auto& b : m_buttons) {
+            if (x >= b.rect.left && x <= b.rect.right && y >= b.rect.top && y <= b.rect.bottom) {
+                m_hoveredButton = b.id;
+                break;
+            }
+        }
+
+        bool prevDropHover = m_dropHover;
+        m_dropHover = (x >= m_dropZoneRect.left && x <= m_dropZoneRect.right &&
+                       y >= m_dropZoneRect.top && y <= m_dropZoneRect.bottom);
+
+        if (m_hoveredButton != -1 || m_dropHover) {
+            SetCursor(LoadCursor(nullptr, IDC_HAND));
+        } else {
+            SetCursor(LoadCursor(nullptr, IDC_ARROW));
+        }
+
+        if (prevHover != m_hoveredButton || prevDropHover != m_dropHover) {
+            InvalidateRect(hwnd, nullptr, FALSE);
         }
         return 0;
     }
 
-    case WM_LBUTTONUP: {
-        if (m_isDragging) {
-            m_isDragging = false;
-            ReleaseCapture();
+    case WM_LBUTTONDOWN: {
+        float x = static_cast<float>(LOWORD(lParam));
+        float y = static_cast<float>(HIWORD(lParam));
+
+        // Check Toolbar Button clicks
+        for (const auto& b : m_buttons) {
+            if (x >= b.rect.left && x <= b.rect.right && y >= b.rect.top && y <= b.rect.bottom) {
+                if (m_onCommand) m_onCommand(b.id);
+                return 0;
+            }
         }
+
+        // Check Drop Zone click
+        if (x >= m_dropZoneRect.left && x <= m_dropZoneRect.right &&
+            y >= m_dropZoneRect.top && y <= m_dropZoneRect.bottom) {
+            if (m_onCommand) m_onCommand(IDM_SCAN_FILE);
+            return 0;
+        }
+
         return 0;
     }
 
     case WM_RBUTTONUP: {
-        POINT pt;
-        GetCursorPos(&pt);
+        POINT pt = { LOWORD(lParam), HIWORD(lParam) };
+        ClientToScreen(hwnd, &pt);
         ShowContextMenu(pt.x, pt.y);
         return 0;
     }
 
-    case WM_KEYDOWN: {
-        if (wParam == VK_ESCAPE) {
-            PostQuitMessage(0);
-            return 0;
-        } else if (wParam == VK_TAB || wParam == VK_SPACE) {
-            m_speechBubble.ToggleExpandedDetails();
-            Render();
-            return 0;
+    case WM_DROPFILES: {
+        HDROP hDrop = reinterpret_cast<HDROP>(wParam);
+        wchar_t szFile[MAX_PATH] = { 0 };
+        if (DragQueryFileW(hDrop, 0, szFile, MAX_PATH)) {
+            if (m_onFileDrop) {
+                m_onFileDrop(szFile);
+            }
         }
-        break;
+        DragFinish(hDrop);
+        return 0;
     }
 
     case WM_DESTROY:

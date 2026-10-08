@@ -18,6 +18,7 @@ public:
 
     void Update(float deltaSeconds);
     void Render(ID2D1RenderTarget* rt, const TriageReport* currentReport, GhostMood currentMood);
+    void RenderAt(ID2D1RenderTarget* rt, const D2D1_RECT_F& cardRect, GhostMood currentMood);
 
     void SetDialogue(const std::string& text, bool immediate = false);
     void ToggleExpandedDetails();
