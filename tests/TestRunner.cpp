@@ -1,10 +1,10 @@
-#include "Common.h"
-#include "Core/PeReader.h"
-#include "Core/CryptoVerifier.h"
-#include "Core/InstructionScanner.h"
-#include "Core/StringScanner.h"
-#include "Core/ThreatAssessor.h"
-#include "Core/TriageReport.h"
+#include "../src/Common.h"
+#include "../src/Core/PeReader.h"
+#include "../src/Core/CryptoVerifier.h"
+#include "../src/Core/InstructionScanner.h"
+#include "../src/Core/StringScanner.h"
+#include "../src/Core/ThreatAssessor.h"
+#include "../src/Core/TriageReport.h"
 #include <iostream>
 #include <vector>
 #include <random>

@@ -134,7 +134,7 @@ void SpeechBubble::Update(float dt) {
 
     // Smooth animation for expanding HUD
     float targetExpanded = m_showExpandedDetails ? 1.0f : 0.0f;
-    m_expandedAnim += (targetExpanded - m_expandedAnim) * std::min(1.0f, dt * 10.0f);
+    m_expandedAnim += (targetExpanded - m_expandedAnim) * (std::min)(1.0f, dt * 10.0f);
 }
 
 void SpeechBubble::Render(ID2D1RenderTarget* rt, const TriageReport* currentReport, GhostMood currentMood) {

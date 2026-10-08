@@ -1,5 +1,5 @@
 #pragma once
-#include "Common.h"
+#include "../Common.h"
 #include "AnimationTypes.h"
 #include <d2d1.h>
 #include <d2d1helper.h>

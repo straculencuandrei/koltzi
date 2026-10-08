@@ -32,7 +32,7 @@ bool GhostWindow::Create() {
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hInstance;
     wc.lpszClassName = L"KoltziMainWindowClass";
-    wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    wc.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
     wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
     wc.style = CS_HREDRAW | CS_VREDRAW;
     RegisterClassExW(&wc);
@@ -970,9 +970,9 @@ LRESULT GhostWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lP
                            y >= m_tabAuditRect.top && y <= m_tabAuditRect.bottom);
 
         if (m_hoveredButton != -1 || m_dropHover || isTabHover) {
-            SetCursor(LoadCursor(nullptr, IDC_HAND));
+            SetCursor(LoadCursorW(nullptr, MAKEINTRESOURCEW(32649)));
         } else {
-            SetCursor(LoadCursor(nullptr, IDC_ARROW));
+            SetCursor(LoadCursorW(nullptr, MAKEINTRESOURCEW(32512)));
         }
 
         if (prevHover != m_hoveredButton || prevDropHover != m_dropHover) {

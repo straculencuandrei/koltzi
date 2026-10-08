@@ -56,6 +56,10 @@ function Invoke-Build {
         Write-Error "Build failed with exit code $LASTEXITCODE."
         return $false
     }
+    $compileCommands = Join-Path $ScriptDir "build_rel\compile_commands.json"
+    if (Test-Path $compileCommands) {
+        Copy-Item -Path $compileCommands -Destination (Join-Path $ScriptDir "compile_commands.json") -Force
+    }
     Write-Host "[Koltzi] Build completed successfully." -ForegroundColor Green
     return $true
 }
@@ -77,6 +81,7 @@ if ($Help) {
 if ($Build) {
     $ok = Invoke-Build
     if (-not $ok) { exit 1 }
+    exit 0
 }
 
 # 2. Ensure Binaries Exist

@@ -68,16 +68,18 @@ namespace Koltzi {
 inline std::wstring Utf8ToWide(const std::string& str) {
     if (str.empty()) return L"";
     int sizeNeeded = MultiByteToWideChar(CP_UTF8, 0, str.data(), (int)str.size(), nullptr, 0);
+    if (sizeNeeded <= 0) return L"";
     std::wstring result(sizeNeeded, 0);
-    MultiByteToWideChar(CP_UTF8, 0, str.data(), (int)str.size(), result.data(), sizeNeeded);
+    MultiByteToWideChar(CP_UTF8, 0, str.data(), (int)str.size(), &result[0], sizeNeeded);
     return result;
 }
 
 inline std::string WideToUtf8(const std::wstring& wstr) {
     if (wstr.empty()) return "";
     int sizeNeeded = WideCharToMultiByte(CP_UTF8, 0, wstr.data(), (int)wstr.size(), nullptr, 0, nullptr, nullptr);
+    if (sizeNeeded <= 0) return "";
     std::string result(sizeNeeded, 0);
-    WideCharToMultiByte(CP_UTF8, 0, wstr.data(), (int)wstr.size(), result.data(), sizeNeeded, nullptr, nullptr);
+    WideCharToMultiByte(CP_UTF8, 0, wstr.data(), (int)wstr.size(), &result[0], sizeNeeded, nullptr, nullptr);
     return result;
 }
 

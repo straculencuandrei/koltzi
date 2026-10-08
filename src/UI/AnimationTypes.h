@@ -1,5 +1,5 @@
 #pragma once
-#include "Core/TriageReport.h"
+#include "../Core/TriageReport.h"
 #include <d2d1.h>
 #include <vector>
 

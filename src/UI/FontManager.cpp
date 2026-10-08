@@ -81,7 +81,7 @@ void FontManager::LoadEmbeddedFonts() {
     std::filesystem::create_directories(tempFontDir, ec);
 
     for (size_t i = 0; i < sizeof(fontResIds) / sizeof(fontResIds[0]); ++i) {
-        HRSRC hRes = FindResourceW(hMod, MAKEINTRESOURCEW(fontResIds[i]), RT_RCDATA);
+        HRSRC hRes = FindResourceW(hMod, MAKEINTRESOURCEW(fontResIds[i]), MAKEINTRESOURCEW(10));
         if (!hRes) continue;
 
         HGLOBAL hMem = LoadResource(hMod, hRes);

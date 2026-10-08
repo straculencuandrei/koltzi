@@ -4,8 +4,9 @@ project(Koltzi VERSION 1.0.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-add_compile_definitions(UNICODE _UNICODE)
+add_compile_definitions(UNICODE _UNICODE NOMINMAX)
 
 # Static CRT (/MT) for standalone portable single .exe without external runtimes
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
@@ -100,6 +101,10 @@ target_link_libraries(Koltzi PRIVATE
     crypt32
 )
 
+target_include_directories(Koltzi PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
 # Build tests executable
 add_executable(KoltziTests
     tests/TestRunner.cpp
@@ -108,6 +113,10 @@ add_executable(KoltziTests
     src/Core/InstructionScanner.cpp
     src/Core/StringScanner.cpp
     src/Core/ThreatAssessor.cpp
+)
+
+target_include_directories(KoltziTests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
 target_link_libraries(KoltziTests PRIVATE

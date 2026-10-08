@@ -1,5 +1,5 @@
 #pragma once
-#include "Common.h"
+#include "../Common.h"
 #include <dwrite.h>
 #include <string>
 #include <vector>

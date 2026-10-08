@@ -1,9 +1,9 @@
 #pragma once
-#include "Common.h"
+#include "../Common.h"
 #include "GhostRenderer.h"
 #include "SpeechBubble.h"
 #include "FontManager.h"
-#include "Core/TriageReport.h"
+#include "../Core/TriageReport.h"
 #include <memory>
 #include <functional>
 #include <vector>

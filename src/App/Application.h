@@ -1,10 +1,10 @@
 #pragma once
-#include "Common.h"
-#include "UI/GhostWindow.h"
-#include "Core/PeReader.h"
-#include "Core/InstructionScanner.h"
-#include "Core/StringScanner.h"
-#include "Core/ThreatAssessor.h"
+#include "../Common.h"
+#include "../UI/GhostWindow.h"
+#include "../Core/PeReader.h"
+#include "../Core/InstructionScanner.h"
+#include "../Core/StringScanner.h"
+#include "../Core/ThreatAssessor.h"
 #include <memory>
 #include <thread>
 #include <mutex>

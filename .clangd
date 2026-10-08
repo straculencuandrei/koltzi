@@ -1,0 +1,39 @@
+CompileFlags:
+  CompilationDatabase: build_rel
+  Add:
+    - -std=c++20
+    - -DUNICODE
+    - -D_UNICODE
+    - -DNOMINMAX
+    - -DWIN32_LEAN_AND_MEAN
+    - -DZYCORE_STATIC_BUILD
+    - -DZYDIS_DISABLE_ENCODER
+    - -DZYDIS_STATIC_BUILD
+    - -imsvc
+    - C:/Program Files (x86)/Microsoft Visual Studio/18/BuildTools/VC/Tools/MSVC/14.51.36231/include
+    - -imsvc
+    - C:/Program Files (x86)/Microsoft Visual Studio/18/BuildTools/VC/Auxiliary/VS/include
+    - -imsvc
+    - C:/Program Files (x86)/Windows Kits/10/include/10.0.26100.0/ucrt
+    - -imsvc
+    - C:/Program Files (x86)/Windows Kits/10/include/10.0.26100.0/um
+    - -imsvc
+    - C:/Program Files (x86)/Windows Kits/10/include/10.0.26100.0/shared
+    - -imsvc
+    - C:/Program Files (x86)/Windows Kits/10/include/10.0.26100.0/winrt
+    - -imsvc
+    - C:/Program Files (x86)/Windows Kits/10/include/10.0.26100.0/cppwinrt
+    - -I
+    - C:/Users/buzunar/Documents/game/koltzi/src
+    - -I
+    - C:/Users/buzunar/Documents/game/koltzi/build_rel/_deps/zydis-src/include
+    - -I
+    - C:/Users/buzunar/Documents/game/koltzi/build_rel/_deps/zydis-build
+    - -I
+    - C:/Users/buzunar/Documents/game/koltzi/build_rel/_deps/zydis-src/dependencies/zycore/include
+    - -I
+    - C:/Users/buzunar/Documents/game/koltzi/build_rel/_deps/zydis-build/zycore
+Diagnostics:
+  UnusedIncludes: None
+  Suppress:
+    - unused-includes

@@ -1,5 +1,5 @@
 #include "Application.h"
-#include "Core/CryptoVerifier.h"
+#include "../Core/CryptoVerifier.h"
 #include <iostream>
 #include <filesystem>
 #include <random>
