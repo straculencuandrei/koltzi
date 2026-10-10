@@ -30,6 +30,9 @@ void PeReader::Close() {
     m_isValid = false;
     m_sections.clear();
     m_imports.clear();
+    m_functionStarts.clear();
+    m_exportRvas.clear();
+    m_imageBase = 0;
     m_dosHeader = nullptr;
     m_ntHeaders32 = nullptr;
     m_ntHeaders64 = nullptr;
@@ -179,6 +182,7 @@ bool PeReader::ParseHeaders() {
         }
         m_ntHeaders64 = reinterpret_cast<const IMAGE_NT_HEADERS64*>(ntHeadersPtr);
         m_entryPointRva = m_ntHeaders64->OptionalHeader.AddressOfEntryPoint;
+        m_imageBase = m_ntHeaders64->OptionalHeader.ImageBase;
         m_subsystem = m_ntHeaders64->OptionalHeader.Subsystem;
         m_sectionHeaders = reinterpret_cast<const IMAGE_SECTION_HEADER*>(
             ntHeadersPtr + sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER) + fileHeader->SizeOfOptionalHeader
@@ -191,6 +195,7 @@ bool PeReader::ParseHeaders() {
         }
         m_ntHeaders32 = reinterpret_cast<const IMAGE_NT_HEADERS32*>(ntHeadersPtr);
         m_entryPointRva = m_ntHeaders32->OptionalHeader.AddressOfEntryPoint;
+        m_imageBase = m_ntHeaders32->OptionalHeader.ImageBase;
         m_subsystem = m_ntHeaders32->OptionalHeader.Subsystem;
         m_sectionHeaders = reinterpret_cast<const IMAGE_SECTION_HEADER*>(
             ntHeadersPtr + sizeof(DWORD) + sizeof(IMAGE_FILE_HEADER) + fileHeader->SizeOfOptionalHeader
@@ -208,6 +213,14 @@ bool PeReader::ParseHeaders() {
     }
 
     ParseImports(); // Non-fatal if missing or packed
+    ParseExports();
+    ParseExceptionDirectory();
+
+    if (m_entryPointRva != 0) {
+        m_functionStarts.push_back(m_entryPointRva);
+    }
+    std::sort(m_functionStarts.begin(), m_functionStarts.end());
+    m_functionStarts.erase(std::unique(m_functionStarts.begin(), m_functionStarts.end()), m_functionStarts.end());
 
     m_isValid = true;
     return true;
@@ -342,9 +355,11 @@ bool PeReader::ParseImports() {
                     );
                     for (size_t f = 0; thunk && f < 4096; ++f) {
                         if (thunk->u1.AddressOfData == 0) break;
+                        uint32_t iatRva = desc->FirstThunk + static_cast<uint32_t>(f * sizeof(IMAGE_THUNK_DATA64));
 
                         if (IMAGE_SNAP_BY_ORDINAL64(thunk->u1.Ordinal)) {
                             entry.functions.push_back("Ordinal#" + std::to_string(IMAGE_ORDINAL64(thunk->u1.Ordinal)));
+                            entry.iatRvas.push_back(iatRva);
                         } else {
                             uint32_t nameRva = static_cast<uint32_t>(thunk->u1.AddressOfData);
                             const IMAGE_IMPORT_BY_NAME* ibn = reinterpret_cast<const IMAGE_IMPORT_BY_NAME*>(
@@ -358,6 +373,7 @@ bool PeReader::ParseImports() {
                                 }
                                 if (!fnName.empty()) {
                                     entry.functions.push_back(fnName);
+                                    entry.iatRvas.push_back(iatRva);
                                 }
                             }
                         }
@@ -371,9 +387,11 @@ bool PeReader::ParseImports() {
                     );
                     for (size_t f = 0; thunk && f < 4096; ++f) {
                         if (thunk->u1.AddressOfData == 0) break;
+                        uint32_t iatRva = desc->FirstThunk + static_cast<uint32_t>(f * sizeof(IMAGE_THUNK_DATA32));
 
                         if (IMAGE_SNAP_BY_ORDINAL32(thunk->u1.Ordinal)) {
                             entry.functions.push_back("Ordinal#" + std::to_string(IMAGE_ORDINAL32(thunk->u1.Ordinal)));
+                            entry.iatRvas.push_back(iatRva);
                         } else {
                             uint32_t nameRva = static_cast<uint32_t>(thunk->u1.AddressOfData);
                             const IMAGE_IMPORT_BY_NAME* ibn = reinterpret_cast<const IMAGE_IMPORT_BY_NAME*>(
@@ -387,6 +405,7 @@ bool PeReader::ParseImports() {
                                 }
                                 if (!fnName.empty()) {
                                     entry.functions.push_back(fnName);
+                                    entry.iatRvas.push_back(iatRva);
                                 }
                             }
                         }
@@ -404,6 +423,86 @@ bool PeReader::ParseImports() {
             RvaToPointer(importDir->VirtualAddress + static_cast<uint32_t>((d + 1) * sizeof(IMAGE_IMPORT_DESCRIPTOR)), sizeof(IMAGE_IMPORT_DESCRIPTOR))
         );
         if (!desc) break;
+    }
+
+    return true;
+}
+
+bool PeReader::ParseExports() {
+    m_exportRvas.clear();
+
+    const IMAGE_DATA_DIRECTORY* exportDir = nullptr;
+    if (m_is64Bit && m_ntHeaders64) {
+        if (IMAGE_DIRECTORY_ENTRY_EXPORT < m_ntHeaders64->OptionalHeader.NumberOfRvaAndSizes) {
+            exportDir = &m_ntHeaders64->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+        }
+    } else if (!m_is64Bit && m_ntHeaders32) {
+        if (IMAGE_DIRECTORY_ENTRY_EXPORT < m_ntHeaders32->OptionalHeader.NumberOfRvaAndSizes) {
+            exportDir = &m_ntHeaders32->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+        }
+    }
+
+    if (!exportDir || exportDir->VirtualAddress == 0 || exportDir->Size == 0) {
+        return true;
+    }
+
+    const uint8_t* expData = RvaToPointer(exportDir->VirtualAddress, sizeof(IMAGE_EXPORT_DIRECTORY));
+    if (!expData) return false;
+
+    const IMAGE_EXPORT_DIRECTORY* exp = reinterpret_cast<const IMAGE_EXPORT_DIRECTORY*>(expData);
+    if (exp->NumberOfFunctions == 0 || exp->AddressOfFunctions == 0) return true;
+
+    uint32_t numFuncs = std::min<uint32_t>(exp->NumberOfFunctions, 65536);
+    const uint32_t* funcTable = reinterpret_cast<const uint32_t*>(
+        RvaToPointer(exp->AddressOfFunctions, numFuncs * sizeof(uint32_t))
+    );
+    if (!funcTable) return false;
+
+    for (uint32_t i = 0; i < numFuncs; ++i) {
+        uint32_t fnRva = funcTable[i];
+        if (fnRva != 0) {
+            // Check if forwarded export (within export directory range)
+            if (fnRva >= exportDir->VirtualAddress && fnRva < exportDir->VirtualAddress + exportDir->Size) {
+                continue;
+            }
+            m_exportRvas.push_back(fnRva);
+            m_functionStarts.push_back(fnRva);
+        }
+    }
+
+    return true;
+}
+
+bool PeReader::ParseExceptionDirectory() {
+    if (!m_is64Bit || !m_ntHeaders64) return true;
+
+    const IMAGE_DATA_DIRECTORY* exceptionDir = nullptr;
+    if (IMAGE_DIRECTORY_ENTRY_EXCEPTION < m_ntHeaders64->OptionalHeader.NumberOfRvaAndSizes) {
+        exceptionDir = &m_ntHeaders64->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
+    }
+
+    if (!exceptionDir || exceptionDir->VirtualAddress == 0 || exceptionDir->Size == 0) {
+        return true;
+    }
+
+    struct RuntimeFunctionEntry {
+        uint32_t beginAddress;
+        uint32_t endAddress;
+        uint32_t unwindData;
+    };
+
+    size_t count = exceptionDir->Size / sizeof(RuntimeFunctionEntry);
+    count = std::min<size_t>(count, 200000);
+
+    const RuntimeFunctionEntry* rfTable = reinterpret_cast<const RuntimeFunctionEntry*>(
+        RvaToPointer(exceptionDir->VirtualAddress, static_cast<uint32_t>(count * sizeof(RuntimeFunctionEntry)))
+    );
+    if (!rfTable) return false;
+
+    for (size_t i = 0; i < count; ++i) {
+        if (rfTable[i].beginAddress != 0) {
+            m_functionStarts.push_back(rfTable[i].beginAddress);
+        }
     }
 
     return true;

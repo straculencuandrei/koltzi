@@ -104,8 +104,17 @@ void ThreatAssessor::Assess(const PeReader& pe, TriageReport& report) {
 
     if (activeApiHashLoops > 0) {
         score += 25;
-        redFlags.push_back(std::format("Evasive API hashing loops identified ({} dynamic resolution loops with stripped imports)", activeApiHashLoops));
-        report.AddLog("ASSESS", "WARN", std::format("+25 pts: Evasive API hashing loops detected (count: {})", activeApiHashLoops));
+        std::vector<std::string> matchedApis;
+        for (const auto& l : report.apiHashLoops) {
+            if (!l.matchedApi.empty()) matchedApis.push_back(l.matchedApi + " [" + l.hashAlgorithm + "]");
+        }
+        if (!matchedApis.empty()) {
+            redFlags.push_back(std::format("Known API Hashes matched in instructions: {}", matchedApis[0]));
+            report.AddLog("ASSESS", "WARN", std::format("+25 pts: Known API Hashes matched (count: {})", matchedApis.size()));
+        } else {
+            redFlags.push_back(std::format("Evasive API hashing loops identified ({} dynamic resolution loops with stripped imports)", activeApiHashLoops));
+            report.AddLog("ASSESS", "WARN", std::format("+25 pts: Evasive API hashing loops detected (count: {})", activeApiHashLoops));
+        }
     } else if (!report.apiHashLoops.empty()) {
         report.AddLog("ASSESS", "INFO", std::format("0 pts: {} rotation loops identified as legitimate cryptographic/cipher primitives", report.apiHashLoops.size()));
     }
@@ -113,6 +122,9 @@ void ThreatAssessor::Assess(const PeReader& pe, TriageReport& report) {
     if (hasInjection) {
         score += 65;
         redFlags.push_back(report.injectionChain.description);
+        if (report.injectionChain.hasRwxProtectArg) {
+            redFlags.push_back("PAGE_EXECUTE_READWRITE (0x40) passed as protection parameter to VirtualAlloc/Protect");
+        }
         report.AddLog("ASSESS", "CRIT", "+65 pts: Cross-process injection chain primitives detected");
     }
 

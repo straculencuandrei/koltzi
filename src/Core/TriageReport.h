@@ -40,6 +40,8 @@ struct SyscallFinding {
     std::string instructionHex;
     std::string disassembly;
     bool isLegitimateJitOrHook = false;
+    bool isStubPattern = false; // verified mov r10, rcx; mov eax, <ssn>; syscall pattern
+    uint32_t ssn = 0;
 };
 
 struct PebAccessFinding {
@@ -50,6 +52,7 @@ struct PebAccessFinding {
     std::string description;
     std::string disassembly;
     bool isCrtTlsInit = false; // Normal CRT __security_init_cookie or TLS index read
+    bool isFullLdrWalk = false; // Followed by actual PEB->Ldr and ModuleList/Export traversal
 };
 
 struct ApiHashFinding {
@@ -58,6 +61,9 @@ struct ApiHashFinding {
     std::string description;
     std::string disassembly;
     bool isLikelyCryptoOrStringHash = false;
+    std::string matchedApi;
+    std::string hashAlgorithm;
+    uint64_t hashValue = 0;
 };
 
 struct InjectionChainFinding {
@@ -65,6 +71,9 @@ struct InjectionChainFinding {
     bool hasRwxAllocation = false;
     bool hasProcessWrite = false;
     bool hasRemoteExecution = false;
+    bool isCoLocated = false; // Called within the same function or direct caller/callee
+    bool hasRwxProtectArg = false; // PAGE_EXECUTE_READWRITE passed to allocation/protection API
+    bool isProcessHollowing = false;
     std::vector<std::string> chainedApis;
     std::string description;
 };
@@ -80,6 +89,7 @@ struct StringFinding {
 struct ImportEntry {
     std::string dllName;
     std::vector<std::string> functions;
+    std::vector<uint32_t> iatRvas;
 };
 
 struct SignatureInfo {
@@ -136,12 +146,12 @@ struct TriageReport {
     // Detailed Audit & Triage Log
     std::vector<TriageLogEntry> logEntries;
 
-    void AddLog(const std::string& subsystem, const std::string& level, const std::string& msg, double timeMs = 0.0) {
+    void AddLog(const std::string& subsystemName, const std::string& level, const std::string& msg, double timeMs = 0.0) {
         TriageLogEntry entry;
         char timeBuf[32];
         snprintf(timeBuf, sizeof(timeBuf), "+%.2fms", timeMs);
         entry.timestamp = timeBuf;
-        entry.subsystem = subsystem;
+        entry.subsystem = subsystemName;
         entry.level = level;
         entry.message = msg;
         logEntries.push_back(std::move(entry));

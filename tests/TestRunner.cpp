@@ -449,6 +449,233 @@ void TestBrowserContextAndFalsePositiveSuppression() {
               << report.threatScore << " / 100)\n";
 }
 
+void TestMetasploitHashSelfCheck() {
+    std::cout << "[TEST] Running Metasploit block_api Self-Checking Hash test...\n";
+
+    uint32_t hLoadLib = InstructionScanner::ComputeMetasploitHash("kernel32.dll", "LoadLibraryA");
+    uint32_t hWsa = InstructionScanner::ComputeMetasploitHash("ws2_32.dll", "WSAStartup");
+    uint32_t hConn = InstructionScanner::ComputeMetasploitHash("ws2_32.dll", "connect");
+    uint32_t hVirt = InstructionScanner::ComputeMetasploitHash("kernel32.dll", "VirtualAlloc");
+    uint32_t hProc = InstructionScanner::ComputeMetasploitHash("kernel32.dll", "GetProcAddress");
+    uint32_t hSock = InstructionScanner::ComputeMetasploitHash("ws2_32.dll", "WSASocketA");
+
+    TEST_ASSERT(hLoadLib == 0x0726774C);
+    TEST_ASSERT(hWsa == 0x006B8029);
+    TEST_ASSERT(hConn == 0x6174A599);
+    TEST_ASSERT(hVirt == 0xE553A458);
+    TEST_ASSERT(hProc == 0x7802F749);
+    TEST_ASSERT(hSock == 0xE0DF0FEA);
+
+    std::cout << "  [PASS] Metasploit ROR13 self-check passed:\n"
+              << "         kernel32.dll!LoadLibraryA  == 0x" << std::hex << std::uppercase << hLoadLib << "\n"
+              << "         ws2_32.dll!WSAStartup      == 0x" << std::hex << std::uppercase << hWsa << "\n"
+              << "         ws2_32.dll!connect         == 0x" << std::hex << std::uppercase << hConn << "\n"
+              << "         kernel32.dll!VirtualAlloc  == 0x" << std::hex << std::uppercase << hVirt << "\n"
+              << "         kernel32.dll!GetProcAddress== 0x" << std::hex << std::uppercase << hProc << "\n";
+}
+
+void TestApiHashImmediateScanning() {
+    std::cout << "[TEST] Running API Hash Immediate Operand Scanning test...\n";
+
+    // Instructions:
+    // mov r10d, 0x0726774C  (LoadLibraryA)
+    // mov edx,  0x7802F749  (GetProcAddress)
+    // ret
+    const uint8_t code[] = {
+        0x41, 0xBA, 0x4C, 0x77, 0x26, 0x07, // mov r10d, 0x0726774C
+        0xBA, 0x49, 0xF7, 0x02, 0x78,       // mov edx,  0x7802F749
+        0xC3                                // ret
+    };
+    std::vector<uint8_t> codeVec(std::begin(code), std::end(code));
+    std::vector<uint8_t> dataVec(64, 0);
+
+    auto peBytes = BuildTestPe64(codeVec, dataVec, "KERNEL32.dll", { "ExitProcess" });
+
+    PeReader pe;
+    bool ok = pe.OpenMemory(peBytes.data(), peBytes.size());
+    TEST_ASSERT(ok);
+
+    TriageReport report;
+    report.sections = pe.GetSections();
+    report.imports = pe.GetImports();
+
+    InstructionScanner is;
+    is.Scan(pe, report);
+
+    TEST_ASSERT(report.apiHashLoops.size() >= 2);
+    bool foundLoadLib = false;
+    bool foundGetProc = false;
+    for (const auto& h : report.apiHashLoops) {
+        if (h.matchedApi == "LoadLibraryA") foundLoadLib = true;
+        if (h.matchedApi == "GetProcAddress") foundGetProc = true;
+    }
+    TEST_ASSERT(foundLoadLib);
+    TEST_ASSERT(foundGetProc);
+
+    ThreatAssessor::Assess(pe, report);
+    TEST_ASSERT(report.threatScore >= 25);
+
+    std::cout << "  [PASS] Immediate API hash scanning passed (Found " << report.apiHashLoops.size()
+              << " hashes: LoadLibraryA, GetProcAddress)\n";
+}
+
+void TestSyscallStubVerification() {
+    std::cout << "[TEST] Running Syscall Stub Structural Verification test...\n";
+
+    // Subcase 1: True syscall stub pattern (mov r10, rcx; mov eax, 0x18; syscall; ret)
+    const uint8_t stubCode[] = {
+        0x49, 0x89, 0xCA,             // mov r10, rcx
+        0xB8, 0x18, 0x00, 0x00, 0x00, // mov eax, 0x18 (SSN)
+        0x0F, 0x05,                   // syscall
+        0xC3                          // ret
+    };
+    std::vector<uint8_t> stubVec(std::begin(stubCode), std::end(stubCode));
+    std::vector<uint8_t> dataVec(64, 0);
+
+    auto peStubBytes = BuildTestPe64(stubVec, dataVec, "ntdll.dll", { "NtClose" });
+    PeReader peStub;
+    TEST_ASSERT(peStub.OpenMemory(peStubBytes.data(), peStubBytes.size()));
+
+    TriageReport rStub;
+    rStub.sections = peStub.GetSections();
+    rStub.imports = peStub.GetImports();
+    InstructionScanner is;
+    is.Scan(peStub, rStub);
+
+    TEST_ASSERT(!rStub.syscalls.empty());
+    TEST_ASSERT(rStub.syscalls[0].isStubPattern == true);
+    TEST_ASSERT(rStub.syscalls[0].ssn == 0x18);
+
+    // Subcase 2: Stray bytes / non-stub (stray 0F 05 in arithmetic with no mov r10 / mov eax)
+    const uint8_t strayCode[] = {
+        0x48, 0x01, 0xD8, // add rax, rbx
+        0x0F, 0x05,       // syscall (stray opcode without stub preamble)
+        0x48, 0x83, 0xC4, 0x08,
+        0xC3
+    };
+    std::vector<uint8_t> strayVec(std::begin(strayCode), std::end(strayCode));
+    auto peStrayBytes = BuildTestPe64(strayVec, dataVec, "USER32.dll", { "MessageBoxW" });
+    PeReader peStray;
+    TEST_ASSERT(peStray.OpenMemory(peStrayBytes.data(), peStrayBytes.size()));
+
+    TriageReport rStray;
+    rStray.sections = peStray.GetSections();
+    rStray.imports = peStray.GetImports();
+    is.Scan(peStray, rStray);
+
+    TEST_ASSERT(!rStray.syscalls.empty());
+    TEST_ASSERT(rStray.syscalls[0].isStubPattern == false);
+
+    std::cout << "  [PASS] Syscall stub structural verification passed (Stub: Pattern=TRUE, SSN=0x18; Stray: Pattern=FALSE)\n";
+}
+
+void TestPebDeepLdrWalkVsBenign() {
+    std::cout << "[TEST] Running PEB Deep Ldr Walk vs Benign GetProcessHeap test...\n";
+
+    // 1. Benign: GS:[0x60] -> [rax + 0x30] (ProcessHeap)
+    const uint8_t benignPeb[] = {
+        0x65, 0x48, 0x8B, 0x04, 0x25, 0x60, 0x00, 0x00, 0x00, // mov rax, gs:[60h]
+        0x48, 0x8B, 0x40, 0x30,                               // mov rax, [rax + 30h] (ProcessHeap)
+        0xC3
+    };
+    std::vector<uint8_t> benignVec(std::begin(benignPeb), std::end(benignPeb));
+    std::vector<uint8_t> dataVec(64, 0);
+
+    auto peBenignBytes = BuildTestPe64(benignVec, dataVec, "KERNEL32.dll", {
+        "CreateFileW", "ReadFile", "CloseHandle", "GetModuleHandleW",
+        "VirtualAlloc", "VirtualFree", "GetProcAddress", "LoadLibraryW",
+        "MultiByteToWideChar", "WideCharToMultiByte", "GetLastError"
+    });
+    PeReader peBenign;
+    TEST_ASSERT(peBenign.OpenMemory(peBenignBytes.data(), peBenignBytes.size()));
+
+    TriageReport rBenign;
+    rBenign.sections = peBenign.GetSections();
+    rBenign.imports = peBenign.GetImports();
+    InstructionScanner is;
+    is.Scan(peBenign, rBenign);
+
+    TEST_ASSERT(!rBenign.pebAccesses.empty());
+    TEST_ASSERT(rBenign.pebAccesses[0].isFullLdrWalk == false);
+    TEST_ASSERT(rBenign.pebAccesses[0].isCrtTlsInit == true);
+
+    // 2. Malicious: GS:[0x60] -> [rdx + 0x18] (PEB.Ldr) -> [rdx + 0x20] (InMemoryOrderModuleList)
+    const uint8_t maliciousPeb[] = {
+        0x65, 0x48, 0x8B, 0x14, 0x25, 0x60, 0x00, 0x00, 0x00, // mov rdx, gs:[60h]
+        0x48, 0x8B, 0x52, 0x18,                               // mov rdx, [rdx + 18h] (Ldr)
+        0x48, 0x8B, 0x52, 0x20,                               // mov rdx, [rdx + 20h] (InMemoryOrderModuleList)
+        0xC3
+    };
+    std::vector<uint8_t> malVec(std::begin(maliciousPeb), std::end(maliciousPeb));
+    auto peMalBytes = BuildTestPe64(malVec, dataVec, "KERNEL32.dll", { "ExitProcess" });
+    PeReader peMal;
+    TEST_ASSERT(peMal.OpenMemory(peMalBytes.data(), peMalBytes.size()));
+
+    TriageReport rMal;
+    rMal.sections = peMal.GetSections();
+    rMal.imports = peMal.GetImports();
+    is.Scan(peMal, rMal);
+
+    TEST_ASSERT(!rMal.pebAccesses.empty());
+    TEST_ASSERT(rMal.pebAccesses[0].isFullLdrWalk == true);
+    TEST_ASSERT(rMal.pebAccesses[0].isCrtTlsInit == false);
+
+    std::cout << "  [PASS] PEB LDR walk verification passed (Benign: FullWalk=FALSE; Malicious: FullWalk=TRUE)\n";
+}
+
+void TestProcessInjectionCoLocationAndRwx() {
+    std::cout << "[TEST] Running Process Injection Co-Location and RWX Argument test...\n";
+
+    // 1. First build to calculate the exact IAT slot RVA for VirtualAllocEx
+    const uint8_t placeholder[] = { 0x90, 0x90, 0x90, 0x90, 0xC3 };
+    std::vector<uint8_t> placeVec(std::begin(placeholder), std::end(placeholder));
+    std::vector<uint8_t> dataVec(64, 0);
+
+    auto peInitBytes = BuildTestPe64(placeVec, dataVec, "KERNEL32.dll", {
+        "VirtualAllocEx", "WriteProcessMemory", "CreateRemoteThread"
+    });
+    PeReader peInit;
+    TEST_ASSERT(peInit.OpenMemory(peInitBytes.data(), peInitBytes.size()));
+    TEST_ASSERT(!peInit.GetImports().empty() && !peInit.GetImports()[0].iatRvas.empty());
+    uint32_t targetIatRva = peInit.GetImports()[0].iatRvas[0];
+
+    // 2. Synthesize code with RWX argument 0x40 setup before VirtualAllocEx:
+    // mov r9d, 0x40 (PAGE_EXECUTE_READWRITE) - 6 bytes (RVA 0x1000 to 0x1005)
+    // call qword ptr [rip + disp]             - 6 bytes (RVA 0x1006 to 0x100B)
+    // ret                                     - 1 byte  (RVA 0x100C)
+    // At call instruction (0x1006), RIP is 0x100C.
+    // disp = targetIatRva - 0x100C
+    int32_t disp = static_cast<int32_t>(targetIatRva - 0x100C);
+    uint8_t rwxCode[] = {
+        0x41, 0xB9, 0x40, 0x00, 0x00, 0x00, // mov r9d, 40h
+        0xFF, 0x15, 0x00, 0x00, 0x00, 0x00, // call qword ptr [rip + disp]
+        0xC3                                // ret
+    };
+    std::memcpy(&rwxCode[8], &disp, sizeof(disp));
+    std::vector<uint8_t> codeVec(std::begin(rwxCode), std::end(rwxCode));
+
+    auto peBytes = BuildTestPe64(codeVec, dataVec, "KERNEL32.dll", {
+        "VirtualAllocEx", "WriteProcessMemory", "CreateRemoteThread"
+    });
+    PeReader pe;
+    TEST_ASSERT(pe.OpenMemory(peBytes.data(), peBytes.size()));
+
+    TriageReport report;
+    report.sections = pe.GetSections();
+    report.imports = pe.GetImports();
+
+    InstructionScanner is;
+    is.Scan(pe, report);
+
+    TEST_ASSERT(report.injectionChain.hasRwxProtectArg == true);
+    TEST_ASSERT(report.injectionChain.detected == true);
+
+    ThreatAssessor::Assess(pe, report);
+    TEST_ASSERT(report.threatLevel == ThreatLevel::Malicious);
+
+    std::cout << "  [PASS] Process Injection RWX parameter recovery passed (hasRwxProtectArg=TRUE)\n";
+}
+
 int main(int argc, char* argv[]) {
     if (argc >= 2) {
         std::string pathStr = argv[1];
@@ -536,6 +763,13 @@ int main(int argc, char* argv[]) {
     TestPackedMummy();
     TestCredentialStealerStrings();
     TestProcessInjectionChain();
+
+    // Deep detection & false-positive elimination tests
+    TestMetasploitHashSelfCheck();
+    TestApiHashImmediateScanning();
+    TestSyscallStubVerification();
+    TestPebDeepLdrWalkVsBenign();
+    TestProcessInjectionCoLocationAndRwx();
 
     std::cout << "========================================================\n";
     std::cout << "  ALL TESTS PASSED WITH 100% SUCCESS!\n";

@@ -39,6 +39,9 @@ public:
     const std::vector<SectionInfo>& GetSections() const { return m_sections; }
     const std::vector<ImportEntry>& GetImports() const { return m_imports; }
     double GetOverallEntropy() const { return m_overallEntropy; }
+    uint64_t GetImageBase() const { return m_imageBase; }
+    const std::vector<uint32_t>& GetFunctionStarts() const { return m_functionStarts; }
+    const std::vector<uint32_t>& GetExportRvas() const { return m_exportRvas; }
 
     // RVA to Raw pointer conversion with safe bounds check
     const uint8_t* RvaToPointer(uint32_t rva, uint32_t size = 1) const;
@@ -52,6 +55,8 @@ private:
     bool ParseHeaders();
     bool ParseSections();
     bool ParseImports();
+    bool ParseExports();
+    bool ParseExceptionDirectory();
 
     HANDLE m_hFile = INVALID_HANDLE_VALUE;
     HANDLE m_hMapping = NULL;
@@ -65,6 +70,7 @@ private:
 
     bool m_is64Bit = false;
     uint16_t m_machine = 0;
+    uint64_t m_imageBase = 0;
     uint32_t m_entryPointRva = 0;
     uint32_t m_timestamp = 0;
     uint16_t m_subsystem = 0;
@@ -78,6 +84,8 @@ private:
 
     std::vector<SectionInfo> m_sections;
     std::vector<ImportEntry> m_imports;
+    std::vector<uint32_t> m_functionStarts;
+    std::vector<uint32_t> m_exportRvas;
 };
 
 } // namespace Koltzi
