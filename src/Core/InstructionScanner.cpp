@@ -483,12 +483,20 @@ void InstructionScanner::ScanSection(const PeReader& pe, const SectionInfo& sec,
                         }
 
                         if (derefsLdr && walksModuleList) {
-                            paf.isFullLdrWalk = true;
-                            paf.isCrtTlsInit = false;
-                            paf.description = "Direct PEB traversal (" + segName + ":[0x" + (offsetVal == 0x60 ? "60" : "30") +
-                                              "] -> PEB.Ldr -> InMemoryOrderModuleList manual export walk)";
-                            report.AddLog("ZYDIS", "WARN", "PEB export evasion traversal detected at " + FormatRva(currentRva));
-                        } else if (!hasHealthyImports && !report.isLegitimateBrowser && !report.signature.isValid) {
+                            if (report.isInstaller || report.isLegitimateBrowser || report.signature.isValid || hasHealthyImports) {
+                                paf.isFullLdrWalk = false;
+                                paf.isCrtTlsInit = true;
+                                paf.description = "Benign runtime dynamic API resolution (" + segName + ":[0x" + (offsetVal == 0x60 ? "60" : "30") +
+                                                  "] -> PEB.Ldr module lookup in verified software / installer)";
+                                report.AddLog("ZYDIS", "INFO", "PEB Ldr lookup at " + FormatRva(currentRva) + " verified as legitimate runtime module resolution");
+                            } else {
+                                paf.isFullLdrWalk = true;
+                                paf.isCrtTlsInit = false;
+                                paf.description = "Direct PEB traversal (" + segName + ":[0x" + (offsetVal == 0x60 ? "60" : "30") +
+                                                  "] -> PEB.Ldr -> InMemoryOrderModuleList manual export walk)";
+                                report.AddLog("ZYDIS", "WARN", "PEB export evasion traversal detected at " + FormatRva(currentRva));
+                            }
+                        } else if (!hasHealthyImports && !report.isLegitimateBrowser && !report.signature.isValid && !report.isInstaller) {
                             // Shellcode or stripped loader without healthy imports
                             paf.isFullLdrWalk = true;
                             paf.isCrtTlsInit = false;
@@ -725,8 +733,7 @@ void InstructionScanner::EvaluateInjectionChain(const PeReader& pe, TriageReport
 
             if (lowerFn == "virtualallocex" || lowerFn == "ntallocatevirtualmemory" ||
                 lowerFn == "zwallocatevirtualmemory" || lowerFn == "mapviewoffile2" ||
-                lowerFn == "ntmapviewofsection" || lowerFn == "zwmapviewofsection" ||
-                lowerFn == "virtualalloc") {
+                lowerFn == "ntmapviewofsection" || lowerFn == "zwmapviewofsection") {
                 hasAlloc = true;
                 foundApis.push_back(fn);
             }
@@ -740,7 +747,7 @@ void InstructionScanner::EvaluateInjectionChain(const PeReader& pe, TriageReport
             if (lowerFn == "createremotethread" || lowerFn == "createremotethreadex" ||
                 lowerFn == "ntcreatethreadex" || lowerFn == "rtlcreateuserthread" ||
                 lowerFn == "queueuserapc" || lowerFn == "ntqueueapcthread" ||
-                lowerFn == "setthreadcontext" || lowerFn == "resumethread") {
+                lowerFn == "setthreadcontext") {
                 hasExec = true;
                 foundApis.push_back(fn);
             }
@@ -879,10 +886,26 @@ void InstructionScanner::EvaluateInjectionChain(const PeReader& pe, TriageReport
         for (const auto& a : apis) {
             std::string l = a;
             std::transform(l.begin(), l.end(), l.begin(), [](unsigned char c) { return (char)::tolower(c); });
-            if (l.find("alloc") != std::string::npos || l.find("map") != std::string::npos) fnAlloc = true;
-            if (l.find("write") != std::string::npos) fnWrite = true;
-            if (l.find("thread") != std::string::npos || l.find("apc") != std::string::npos) fnExec = true;
-            if (l.find("unmap") != std::string::npos || l.find("context") != std::string::npos || l.find("resume") != std::string::npos) fnHollow = true;
+            // Strict match for cross-process memory allocation / mapping or RWX allocation:
+            if (l == "virtualallocex" || l == "ntallocatevirtualmemory" || l == "zwallocatevirtualmemory" ||
+                l == "ntmapviewofsection" || l == "zwmapviewofsection" ||
+                (l == "virtualalloc" && report.injectionChain.hasRwxProtectArg)) {
+                fnAlloc = true;
+            }
+            // Strict match for cross-process memory write (never regular WriteFile):
+            if (l == "writeprocessmemory" || l == "ntwritevirtualmemory" || l == "zwwritevirtualmemory") {
+                fnWrite = true;
+            }
+            // Strict match for remote thread / execution (never regular CreateThread):
+            if (l == "createremotethread" || l == "createremotethreadex" || l == "ntcreatethreadex" ||
+                l == "rtlcreateuserthread" || l == "queueuserapc" || l == "ntqueueapcthread" ||
+                l == "setthreadcontext") {
+                fnExec = true;
+            }
+            // Strict match for process hollowing unmapping:
+            if (l == "ntunmapviewofsection" || l == "zwunmapviewofsection") {
+                fnHollow = true;
+            }
         }
 
         if (fnAlloc && fnWrite && fnExec) {

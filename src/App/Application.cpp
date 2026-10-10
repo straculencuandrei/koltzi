@@ -76,7 +76,7 @@ void Application::HandleMenuCommand(int cmd) {
         break;
     case 2008: // IDM_RESET
         m_window->SetMood(GhostMood::Idle);
-        m_window->SetDialogue("Boo! I'm Koltzi! Drag and drop any PE binary (.exe / .dll) onto me and I'll sniff out hidden threats!", true);
+        m_window->SetDialogue("Standby. Ready for binary analysis. Drop a PE binary target to begin.", true);
         m_window->Render();
         break;
     case 2009: // IDM_EXIT
@@ -86,9 +86,8 @@ void Application::HandleMenuCommand(int cmd) {
 }
 
 void Application::TriageFileAsync(const std::wstring& filePath) {
-    // 1. Immediately switch mascot to Sniffing mode
     m_window->SetMood(GhostMood::Sniffing);
-    m_window->SetDialogue("Sniffing PE bytes... Hold still while I parse headers and sweep instructions!", false);
+    m_window->SetDialogue("Ingesting target binary. Parsing PE headers, validating digital certificates, and scanning instruction streams.", false);
     m_window->Render();
 
     // 2. Launch asynchronous worker thread (guarantees 60 FPS animation never stutters)
@@ -114,7 +113,7 @@ void Application::TriageFileAsync(const std::wstring& filePath) {
             report->threatScore = 15;
             report->threatLevel = ThreatLevel::Suspicious;
             report->mood = GhostMood::Puzzled;
-            report->personalityDialogue = "Hmm... That doesn't look like a valid Windows PE binary (EXE/DLL)! " + pe.GetError();
+            report->personalityDialogue = "The specified file is not a valid Windows PE binary. " + pe.GetError();
             report->technicalDetails.push_back("[ERROR] " + pe.GetError());
         } else {
             report->parseSuccess = true;
@@ -127,6 +126,9 @@ void Application::TriageFileAsync(const std::wstring& filePath) {
             report->overallEntropy = pe.GetOverallEntropy();
             report->sections = pe.GetSections();
             report->imports = pe.GetImports();
+
+            // Detect legitimate installer package signatures
+            pe.DetectInstaller(*report);
 
             // Compute MD5, SHA-1, SHA-256 and Imphash
             CryptoVerifier::ComputeHashes(pe.GetBaseAddress(), pe.GetFileSize(), report->imports, *report);
@@ -158,7 +160,7 @@ void Application::TriageFileAsync(const std::wstring& filePath) {
 
 void Application::TriageMemoryAsync(const uint8_t* data, size_t size, const std::string& sampleName) {
     m_window->SetMood(GhostMood::Sniffing);
-    m_window->SetDialogue("Sniffing sample: " + sampleName + "...", false);
+    m_window->SetDialogue("Analyzing sample " + sampleName + ".", false);
     m_window->Render();
 
     std::vector<uint8_t> buffer(data, data + size);
@@ -181,7 +183,7 @@ void Application::TriageMemoryAsync(const uint8_t* data, size_t size, const std:
             report->threatScore = 15;
             report->threatLevel = ThreatLevel::Suspicious;
             report->mood = GhostMood::Puzzled;
-            report->personalityDialogue = "Failed to parse sample memory: " + pe.GetError();
+            report->personalityDialogue = "Failed to parse sample memory. " + pe.GetError();
         } else {
             report->parseSuccess = true;
             report->fileSize = pe.GetFileSize();
@@ -193,6 +195,8 @@ void Application::TriageMemoryAsync(const uint8_t* data, size_t size, const std:
             report->overallEntropy = pe.GetOverallEntropy();
             report->sections = pe.GetSections();
             report->imports = pe.GetImports();
+
+            pe.DetectInstaller(*report);
 
             CryptoVerifier::ComputeHashes(pe.GetBaseAddress(), pe.GetFileSize(), report->imports, *report);
             CryptoVerifier::VerifyAuthenticode(L"", pe.GetBaseAddress(), pe.GetFileSize(), *report);
@@ -215,11 +219,18 @@ void Application::TriageMemoryAsync(const uint8_t* data, size_t size, const std:
 static void PrintToConsole(const std::string& str) {
     HANDLE hStd = GetStdHandle(STD_OUTPUT_HANDLE);
     if (hStd && hStd != INVALID_HANDLE_VALUE) {
-        std::wstring wstr = Utf8ToWide(str);
-        DWORD written = 0;
-        WriteConsoleW(hStd, wstr.c_str(), static_cast<DWORD>(wstr.size()), &written, nullptr);
+        DWORD mode = 0;
+        if (GetConsoleMode(hStd, &mode)) {
+            std::wstring wstr = Utf8ToWide(str);
+            DWORD written = 0;
+            WriteConsoleW(hStd, wstr.c_str(), static_cast<DWORD>(wstr.size()), &written, nullptr);
+        } else {
+            DWORD written = 0;
+            WriteFile(hStd, str.data(), static_cast<DWORD>(str.size()), &written, nullptr);
+        }
+    } else {
+        std::cout << str;
     }
-    std::cout << str;
 }
 
 bool Application::TriageFileCli(const std::wstring& filePath) {
@@ -243,6 +254,8 @@ bool Application::TriageFileCli(const std::wstring& filePath) {
     report.overallEntropy = pe.GetOverallEntropy();
     report.sections = pe.GetSections();
     report.imports = pe.GetImports();
+
+    pe.DetectInstaller(report);
 
     CryptoVerifier::ComputeHashes(pe.GetBaseAddress(), pe.GetFileSize(), report.imports, report);
     CryptoVerifier::VerifyAuthenticode(filePath, pe.GetBaseAddress(), pe.GetFileSize(), report);
@@ -316,12 +329,124 @@ bool Application::TriageFileCli(const std::wstring& filePath) {
     return true;
 }
 
+bool Application::TriageFileJson(const std::wstring& filePath) {
+    auto start = std::chrono::high_resolution_clock::now();
+    TriageReport report;
+    report.filePath = filePath;
+    try {
+        report.fileName = std::filesystem::path(filePath).filename().string();
+    } catch (...) {
+        report.fileName = WideToUtf8(filePath);
+    }
+
+    PeReader pe;
+    if (!pe.OpenFile(filePath)) {
+        report.parseSuccess = false;
+        report.parseError = pe.GetError();
+        report.threatScore = 15;
+        report.threatLevel = ThreatLevel::Suspicious;
+        report.mood = GhostMood::Puzzled;
+        report.personalityDialogue = "Failed to parse PE binary: " + pe.GetError();
+        PrintToConsole(report.ToJson() + "\n");
+        return false;
+    }
+
+    report.parseSuccess = true;
+    report.fileSize = pe.GetFileSize();
+    report.is64Bit = pe.Is64Bit();
+    report.machineType = pe.GetMachineString();
+    report.subsystem = pe.GetSubsystemString();
+    report.timestamp = pe.GetTimestamp();
+    report.entryPointRva = pe.GetEntryPointRva();
+    report.overallEntropy = pe.GetOverallEntropy();
+    report.sections = pe.GetSections();
+    report.imports = pe.GetImports();
+
+    pe.DetectInstaller(report);
+    CryptoVerifier::ComputeHashes(pe.GetBaseAddress(), pe.GetFileSize(), report.imports, report);
+    CryptoVerifier::VerifyAuthenticode(filePath, pe.GetBaseAddress(), pe.GetFileSize(), report);
+    m_instructionScanner.Scan(pe, report);
+    m_stringScanner.Scan(pe, report);
+    ThreatAssessor::Assess(pe, report);
+
+    auto end = std::chrono::high_resolution_clock::now();
+    report.analysisTimeMs = std::chrono::duration<double, std::milli>(end - start).count();
+
+    PrintToConsole(report.ToJson() + "\n");
+    return true;
+}
+
+bool Application::TriageSampleJson(const std::string& sampleType) {
+    std::vector<uint8_t> buf;
+    std::string name = "sample.exe";
+    if (sampleType == "clean") {
+        buf = GenerateCleanSample();
+        name = "Sample_Clean_Friendly.exe";
+    } else if (sampleType == "packed") {
+        buf = GeneratePackedSample();
+        name = "Sample_Packed_Mummy.exe";
+    } else if (sampleType == "syscall") {
+        buf = GenerateSyscallPebSample();
+        name = "Sample_Syscall_PEBHashing.exe";
+    } else if (sampleType == "stealer") {
+        buf = GenerateCredStealerSample();
+        name = "Sample_Credential_Stealer.exe";
+    } else if (sampleType == "injection") {
+        buf = GenerateInjectionSample();
+        name = "Sample_Process_Injection.exe";
+    } else {
+        PrintToConsole("{\"parseSuccess\":false,\"parseError\":\"Unknown sample profile\"}\n");
+        return false;
+    }
+
+    auto start = std::chrono::high_resolution_clock::now();
+    TriageReport report;
+    report.fileName = name;
+    report.filePath = Utf8ToWide(name);
+
+    PeReader pe;
+    if (!pe.OpenMemory(buf.data(), buf.size(), Utf8ToWide(name))) {
+        report.parseSuccess = false;
+        report.parseError = pe.GetError();
+        PrintToConsole(report.ToJson() + "\n");
+        return false;
+    }
+
+    report.parseSuccess = true;
+    report.fileSize = pe.GetFileSize();
+    report.is64Bit = pe.Is64Bit();
+    report.machineType = pe.GetMachineString();
+    report.subsystem = pe.GetSubsystemString();
+    report.timestamp = pe.GetTimestamp();
+    report.entryPointRva = pe.GetEntryPointRva();
+    report.overallEntropy = pe.GetOverallEntropy();
+    report.sections = pe.GetSections();
+    report.imports = pe.GetImports();
+
+    pe.DetectInstaller(report);
+    CryptoVerifier::ComputeHashes(pe.GetBaseAddress(), pe.GetFileSize(), report.imports, report);
+    CryptoVerifier::VerifyAuthenticode(L"", pe.GetBaseAddress(), pe.GetFileSize(), report);
+    m_instructionScanner.Scan(pe, report);
+    m_stringScanner.Scan(pe, report);
+    ThreatAssessor::Assess(pe, report);
+
+    auto end = std::chrono::high_resolution_clock::now();
+    report.analysisTimeMs = std::chrono::duration<double, std::milli>(end - start).count();
+
+    PrintToConsole(report.ToJson() + "\n");
+    return true;
+}
+
 int Application::Run(int argc, wchar_t* argv[]) {
     // Check CLI argument options
     if (argc >= 2) {
         std::wstring arg1 = argv[1];
         if (arg1 == L"--cli" && argc >= 3) {
             return TriageFileCli(argv[2]) ? 0 : 1;
+        } else if (arg1 == L"--json" && argc >= 3) {
+            return TriageFileJson(argv[2]) ? 0 : 1;
+        } else if (arg1 == L"--json-sample" && argc >= 3) {
+            return TriageSampleJson(WideToUtf8(argv[2])) ? 0 : 1;
         } else if (arg1 == L"--test-all") {
             PrintToConsole("[Koltzi] Running self-test suite on all threat profiles...\n");
             auto cleanBuf = GenerateCleanSample();
@@ -376,11 +501,6 @@ int Application::Run(int argc, wchar_t* argv[]) {
             }
             PrintToConsole("\n[Koltzi] All 5 profiles validated successfully!\n");
             return 0;
-        } else if (std::filesystem::exists(arg1)) {
-            // File dropped on exe directly in Windows Explorer
-            if (!m_window->Create()) return 1;
-            m_window->Show();
-            TriageFileAsync(arg1);
         }
     }
 
@@ -390,6 +510,10 @@ int Application::Run(int argc, wchar_t* argv[]) {
     }
 
     m_window->Show();
+
+    if (argc >= 2 && std::filesystem::exists(argv[1])) {
+        TriageFileAsync(argv[1]);
+    }
 
     // Standard Win32 Message Loop
     MSG msg;

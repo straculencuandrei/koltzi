@@ -1,4 +1,5 @@
 #pragma once
+#include "../Common.h"
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -135,6 +136,10 @@ struct TriageReport {
     bool isLegitimateBrowser = false;
     std::string browserIdentity;
 
+    // Legitimate Installer / Setup Package Detection
+    bool isInstaller = false;
+    std::string installerType;
+
     std::vector<SectionInfo> sections;
     std::vector<ImportEntry> imports;
     std::vector<SyscallFinding> syscalls;
@@ -162,7 +167,134 @@ struct TriageReport {
     ThreatLevel threatLevel = ThreatLevel::Clean;
     GhostMood mood = GhostMood::Happy;
     std::string personalityDialogue;
+    std::vector<std::string> dialogueLines;
+    size_t activeDialogueIndex = 0;
+
+    std::string GetCurrentDialogue() const {
+        if (!dialogueLines.empty() && activeDialogueIndex < dialogueLines.size()) {
+            return dialogueLines[activeDialogueIndex];
+        }
+        return personalityDialogue;
+    }
+
+    void CycleDialogue() {
+        if (!dialogueLines.empty()) {
+            activeDialogueIndex = (activeDialogueIndex + 1) % dialogueLines.size();
+            personalityDialogue = dialogueLines[activeDialogueIndex];
+        }
+    }
+
     std::vector<std::string> technicalDetails;
+
+    std::string ToJson() const {
+        auto EscapeJson = [](const std::string& s) {
+            std::string out;
+            out.reserve(s.size() + 16);
+            for (char c : s) {
+                switch (c) {
+                    case '"': out += "\\\""; break;
+                    case '\\': out += "\\\\"; break;
+                    case '\b': out += "\\b"; break;
+                    case '\f': out += "\\f"; break;
+                    case '\n': out += "\\n"; break;
+                    case '\r': out += "\\r"; break;
+                    case '\t': out += "\\t"; break;
+                    default:
+                        if (static_cast<unsigned char>(c) < 0x20) {
+                            char buf[8];
+                            snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned char>(c));
+                            out += buf;
+                        } else {
+                            out += c;
+                        }
+                        break;
+                }
+            }
+            return out;
+        };
+
+        std::string json = "{\n";
+        json += "  \"parseSuccess\": " + std::string(parseSuccess ? "true" : "false") + ",\n";
+        json += "  \"parseError\": \"" + EscapeJson(parseError) + "\",\n";
+        json += "  \"fileName\": \"" + EscapeJson(fileName) + "\",\n";
+        json += "  \"filePath\": \"" + EscapeJson(WideToUtf8(filePath)) + "\",\n";
+        json += "  \"fileSize\": " + std::to_string(fileSize) + ",\n";
+        json += "  \"is64Bit\": " + std::string(is64Bit ? "true" : "false") + ",\n";
+        json += "  \"machineType\": \"" + EscapeJson(machineType) + "\",\n";
+        json += "  \"subsystem\": \"" + EscapeJson(subsystem) + "\",\n";
+        json += "  \"timestamp\": " + std::to_string(timestamp) + ",\n";
+        json += "  \"entryPointRva\": " + std::to_string(entryPointRva) + ",\n";
+        json += "  \"overallEntropy\": " + std::to_string(overallEntropy) + ",\n";
+        json += "  \"threatScore\": " + std::to_string(threatScore) + ",\n";
+        json += "  \"threatLevel\": " + std::to_string(static_cast<int>(threatLevel)) + ",\n";
+        json += "  \"mood\": " + std::to_string(static_cast<int>(mood)) + ",\n";
+        json += "  \"personalityDialogue\": \"" + EscapeJson(personalityDialogue) + "\",\n";
+        json += "  \"analysisTimeMs\": " + std::to_string(analysisTimeMs) + ",\n";
+        json += "  \"isInstaller\": " + std::string(isInstaller ? "true" : "false") + ",\n";
+        json += "  \"installerType\": \"" + EscapeJson(installerType) + "\",\n";
+        json += "  \"isLegitimateBrowser\": " + std::string(isLegitimateBrowser ? "true" : "false") + ",\n";
+        json += "  \"browserIdentity\": \"" + EscapeJson(browserIdentity) + "\",\n";
+        json += "  \"md5\": \"" + EscapeJson(md5) + "\",\n";
+        json += "  \"sha1\": \"" + EscapeJson(sha1) + "\",\n";
+        json += "  \"sha256\": \"" + EscapeJson(sha256) + "\",\n";
+        json += "  \"imphash\": \"" + EscapeJson(imphash) + "\",\n";
+        json += "  \"signature\": {\n";
+        json += "    \"isSigned\": " + std::string(signature.isSigned ? "true" : "false") + ",\n";
+        json += "    \"isValid\": " + std::string(signature.isValid ? "true" : "false") + ",\n";
+        json += "    \"isTrustedVendor\": " + std::string(signature.isTrustedVendor ? "true" : "false") + ",\n";
+        json += "    \"signerSubject\": \"" + EscapeJson(signature.signerSubject) + "\",\n";
+        json += "    \"signerIssuer\": \"" + EscapeJson(signature.signerIssuer) + "\",\n";
+        json += "    \"statusText\": \"" + EscapeJson(signature.statusText) + "\"\n";
+        json += "  },\n";
+        json += "  \"sections\": [\n";
+        for (size_t i = 0; i < sections.size(); ++i) {
+            const auto& s = sections[i];
+            json += "    {\n";
+            json += "      \"name\": \"" + EscapeJson(s.name) + "\",\n";
+            json += "      \"virtualAddress\": " + std::to_string(s.virtualAddress) + ",\n";
+            json += "      \"virtualSize\": " + std::to_string(s.virtualSize) + ",\n";
+            json += "      \"rawOffset\": " + std::to_string(s.rawOffset) + ",\n";
+            json += "      \"rawSize\": " + std::to_string(s.rawSize) + ",\n";
+            json += "      \"entropy\": " + std::to_string(s.entropy) + ",\n";
+            json += "      \"isExecutable\": " + std::string(s.isExecutable ? "true" : "false") + ",\n";
+            json += "      \"isWritable\": " + std::string(s.isWritable ? "true" : "false") + ",\n";
+            json += "      \"isSuspiciousEntropy\": " + std::string(s.isSuspiciousEntropy ? "true" : "false") + ",\n";
+            json += "      \"isRwx\": " + std::string(s.isRwx ? "true" : "false") + "\n";
+            json += "    }" + std::string(i + 1 < sections.size() ? "," : "") + "\n";
+        }
+        json += "  ],\n";
+        json += "  \"imports\": [\n";
+        for (size_t i = 0; i < imports.size(); ++i) {
+            const auto& imp = imports[i];
+            json += "    {\n";
+            json += "      \"dllName\": \"" + EscapeJson(imp.dllName) + "\",\n";
+            json += "      \"functions\": [";
+            for (size_t j = 0; j < imp.functions.size(); ++j) {
+                json += "\"" + EscapeJson(imp.functions[j]) + "\"" + (j + 1 < imp.functions.size() ? ", " : "");
+            }
+            json += "]\n";
+            json += "    }" + std::string(i + 1 < imports.size() ? "," : "") + "\n";
+        }
+        json += "  ],\n";
+        json += "  \"technicalDetails\": [\n";
+        for (size_t i = 0; i < technicalDetails.size(); ++i) {
+            json += "    \"" + EscapeJson(technicalDetails[i]) + "\"" + (i + 1 < technicalDetails.size() ? "," : "") + "\n";
+        }
+        json += "  ],\n";
+        json += "  \"logEntries\": [\n";
+        for (size_t i = 0; i < logEntries.size(); ++i) {
+            const auto& le = logEntries[i];
+            json += "    {\n";
+            json += "      \"timestamp\": \"" + EscapeJson(le.timestamp) + "\",\n";
+            json += "      \"level\": \"" + EscapeJson(le.level) + "\",\n";
+            json += "      \"subsystem\": \"" + EscapeJson(le.subsystem) + "\",\n";
+            json += "      \"message\": \"" + EscapeJson(le.message) + "\"\n";
+            json += "    }" + std::string(i + 1 < logEntries.size() ? "," : "") + "\n";
+        }
+        json += "  ]\n";
+        json += "}\n";
+        return json;
+    }
 };
 
 } // namespace Koltzi

@@ -1,6 +1,7 @@
 #include "FontManager.h"
-#include "../../res/resource.h"
+#include <dwrite_3.h>
 #include <filesystem>
+#include <iostream>
 
 namespace Koltzi {
 
@@ -10,117 +11,83 @@ FontManager::~FontManager() {
     Shutdown();
 }
 
-void FontManager::LoadDiskFonts() {
-    // Possible paths for FONT/creato_display
+void FontManager::LoadJetBrainsFonts() {
     std::vector<std::filesystem::path> searchDirs = {
-        std::filesystem::current_path() / "FONT" / "creato_display",
-        std::filesystem::current_path() / ".." / "FONT" / "creato_display",
-        std::filesystem::path(L"FONT") / L"creato_display"
+        std::filesystem::current_path() / "FONT" / "fonts" / "ttf",
+        std::filesystem::current_path() / ".." / "FONT" / "fonts" / "ttf",
+        std::filesystem::path(L"C:/Users/buzunar/Documents/game/koltzi/FONT/fonts/ttf")
     };
 
-    // Get executable path directory as another candidate
     wchar_t exePathBuf[MAX_PATH] = { 0 };
     if (GetModuleFileNameW(nullptr, exePathBuf, MAX_PATH) > 0) {
         std::filesystem::path exeDir = std::filesystem::path(exePathBuf).parent_path();
-        searchDirs.push_back(exeDir / "FONT" / "creato_display");
-        searchDirs.push_back(exeDir / ".." / "FONT" / "creato_display");
+        searchDirs.push_back(exeDir / "FONT" / "fonts" / "ttf");
+        searchDirs.push_back(exeDir / ".." / "FONT" / "fonts" / "ttf");
     }
 
+    std::vector<std::wstring> fontFiles;
     for (const auto& dir : searchDirs) {
         if (std::filesystem::exists(dir) && std::filesystem::is_directory(dir)) {
-            bool anyAdded = false;
             for (const auto& entry : std::filesystem::directory_iterator(dir)) {
-                if (entry.path().extension() == ".otf") {
+                if (entry.path().extension() == ".ttf") {
                     std::wstring fullPath = entry.path().wstring();
                     int res = AddFontResourceExW(fullPath.c_str(), FR_PRIVATE, 0);
                     if (res > 0) {
                         m_registeredDiskFonts.push_back(fullPath);
-                        anyAdded = true;
+                        fontFiles.push_back(fullPath);
                     }
                 }
             }
-            if (anyAdded) {
-                m_creatoLoaded = true;
-                return;
+            if (!fontFiles.empty()) {
+                break;
             }
         }
     }
+
+    if (fontFiles.empty()) {
+        return;
+    }
+
+    // DirectWrite IDWriteFactory5 Custom Font Set Builder
+    IDWriteFactory5* factory5 = nullptr;
+    if (SUCCEEDED(m_dwriteFactory->QueryInterface(__uuidof(IDWriteFactory5), reinterpret_cast<void**>(&factory5))) && factory5) {
+        IDWriteFontSetBuilder1* builder = nullptr;
+        if (SUCCEEDED(factory5->CreateFontSetBuilder(&builder)) && builder) {
+            for (const auto& fPath : fontFiles) {
+                IDWriteFontFile* fontFile = nullptr;
+                if (SUCCEEDED(factory5->CreateFontFileReference(fPath.c_str(), nullptr, &fontFile)) && fontFile) {
+                    builder->AddFontFile(fontFile);
+                    fontFile->Release();
+                }
+            }
+            IDWriteFontSet* fontSet = nullptr;
+            if (SUCCEEDED(builder->CreateFontSet(&fontSet)) && fontSet) {
+                IDWriteFontCollection1* col1 = nullptr;
+                if (SUCCEEDED(factory5->CreateFontCollectionFromFontSet(fontSet, &col1)) && col1) {
+                    m_fontCollection = col1;
+                    m_fontLoaded = true;
+                    m_fontFamily = L"JetBrains Mono";
+                }
+                fontSet->Release();
+            }
+            builder->Release();
+        }
+        factory5->Release();
+    }
 }
 
-void FontManager::LoadEmbeddedFonts() {
-    HMODULE hMod = GetModuleHandle(nullptr);
-    if (!hMod) return;
+void FontManager::InitUiFontFamily() {
+    m_uiFamily = L"Segoe UI";
+    if (!m_dwriteFactory) return;
 
-    int fontResIds[] = {
-        IDR_FONT_THIN,
-        IDR_FONT_LIGHT,
-        IDR_FONT_REGULAR,
-        IDR_FONT_REGULAR_ITAL,
-        IDR_FONT_MEDIUM,
-        IDR_FONT_BOLD,
-        IDR_FONT_EXTRABOLD,
-        IDR_FONT_BLACK
-    };
-
-    const wchar_t* fontNames[] = {
-        L"CreatoDisplay-Thin.otf",
-        L"CreatoDisplay-Light.otf",
-        L"CreatoDisplay-Regular.otf",
-        L"CreatoDisplay-RegularItalic.otf",
-        L"CreatoDisplay-Medium.otf",
-        L"CreatoDisplay-Bold.otf",
-        L"CreatoDisplay-ExtraBold.otf",
-        L"CreatoDisplay-Black.otf"
-    };
-
-    wchar_t tempDirBuf[MAX_PATH] = { 0 };
-    if (GetTempPathW(MAX_PATH, tempDirBuf) == 0) return;
-
-    std::filesystem::path tempFontDir = std::filesystem::path(tempDirBuf) / L"KoltziFonts";
-    std::error_code ec;
-    std::filesystem::create_directories(tempFontDir, ec);
-
-    for (size_t i = 0; i < sizeof(fontResIds) / sizeof(fontResIds[0]); ++i) {
-        HRSRC hRes = FindResourceW(hMod, MAKEINTRESOURCEW(fontResIds[i]), MAKEINTRESOURCEW(10));
-        if (!hRes) continue;
-
-        HGLOBAL hMem = LoadResource(hMod, hRes);
-        if (!hMem) continue;
-
-        void* pData = LockResource(hMem);
-        DWORD size = SizeofResource(hMod, hRes);
-        if (!pData || size == 0) continue;
-
-        // Also add to memory font table for GDI
-        DWORD cFonts = 0;
-        HANDLE hMemFont = AddFontMemResourceEx(pData, size, nullptr, &cFonts);
-        if (hMemFont) {
-            m_memFontHandles.push_back(hMemFont);
+    IDWriteFontCollection* sysCol = nullptr;
+    if (SUCCEEDED(m_dwriteFactory->GetSystemFontCollection(&sysCol)) && sysCol) {
+        UINT32 index = 0;
+        BOOL exists = FALSE;
+        if (SUCCEEDED(sysCol->FindFamilyName(L"Segoe UI Variable Text", &index, &exists)) && exists) {
+            m_uiFamily = L"Segoe UI Variable Text";
         }
-
-        // Write to temp file for DirectWrite system font collection
-        std::filesystem::path targetFile = tempFontDir / fontNames[i];
-        HANDLE hFile = CreateFileW(
-            targetFile.c_str(),
-            GENERIC_WRITE,
-            0,
-            nullptr,
-            CREATE_ALWAYS,
-            FILE_ATTRIBUTE_NORMAL,
-            nullptr
-        );
-
-        if (hFile != INVALID_HANDLE_VALUE) {
-            DWORD written = 0;
-            WriteFile(hFile, pData, size, &written, nullptr);
-            CloseHandle(hFile);
-
-            int res = AddFontResourceExW(targetFile.c_str(), FR_PRIVATE, 0);
-            if (res > 0) {
-                m_registeredDiskFonts.push_back(targetFile.wstring());
-                m_creatoLoaded = true;
-            }
-        }
+        sysCol->Release();
     }
 }
 
@@ -128,139 +95,98 @@ bool FontManager::Initialize(IDWriteFactory* dwriteFactory) {
     if (!dwriteFactory) return false;
     m_dwriteFactory = dwriteFactory;
 
-    // First try disk fonts
-    LoadDiskFonts();
+    InitUiFontFamily();
+    LoadJetBrainsFonts();
 
-    // If not found on disk, extract embedded resources
-    if (!m_creatoLoaded) {
-        LoadEmbeddedFonts();
-    }
+    const wchar_t* monoFam = m_fontLoaded ? m_fontFamily.c_str() : L"Consolas";
+    IDWriteFontCollection* monoCol = m_fontCollection;
 
-    // Set font family
-    const wchar_t* family = m_creatoLoaded ? L"Creato Display" : L"Segoe UI";
-    m_fontFamily = family;
-
-    // 1. Title format: Black / ExtraBold, 16pt (for Koltzi branding, big labels)
+    // --- UI Sans-serif Formats (Segoe UI Variable / Segoe UI) ---
     m_dwriteFactory->CreateTextFormat(
-        family,
-        nullptr,
-        DWRITE_FONT_WEIGHT_BLACK,
-        DWRITE_FONT_STYLE_NORMAL,
-        DWRITE_FONT_STRETCH_NORMAL,
-        16.0f,
-        L"en-us",
-        &m_titleFormat
+        m_uiFamily.c_str(), nullptr,
+        DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        15.0f, L"en-us", &m_uiTitleFormat
     );
 
-    // 2. Header format: ExtraBold, 13.5pt (for dashboard card headings)
     m_dwriteFactory->CreateTextFormat(
-        family,
-        nullptr,
-        DWRITE_FONT_WEIGHT_EXTRA_BOLD,
-        DWRITE_FONT_STYLE_NORMAL,
-        DWRITE_FONT_STRETCH_NORMAL,
-        13.5f,
-        L"en-us",
-        &m_headerFormat
+        m_uiFamily.c_str(), nullptr,
+        DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        12.5f, L"en-us", &m_uiHeaderFormat
     );
 
-    // 3. Subheading format: Bold, 11.5pt (for card subheads, metric values)
     m_dwriteFactory->CreateTextFormat(
-        family,
-        nullptr,
-        DWRITE_FONT_WEIGHT_BOLD,
-        DWRITE_FONT_STYLE_NORMAL,
-        DWRITE_FONT_STRETCH_NORMAL,
-        11.5f,
-        L"en-us",
-        &m_subheadingFormat
+        m_uiFamily.c_str(), nullptr,
+        DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        11.0f, L"en-us", &m_uiSubheadingFormat
     );
 
-    // 4. Button format: Medium, 10.5pt (for toolbar buttons)
     m_dwriteFactory->CreateTextFormat(
-        family,
-        nullptr,
-        DWRITE_FONT_WEIGHT_MEDIUM,
-        DWRITE_FONT_STYLE_NORMAL,
-        DWRITE_FONT_STRETCH_NORMAL,
-        10.5f,
-        L"en-us",
-        &m_buttonFormat
+        m_uiFamily.c_str(), nullptr,
+        DWRITE_FONT_WEIGHT_REGULAR, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        10.0f, L"en-us", &m_uiLabelFormat
     );
 
-    // 5. Body format: Regular, 12.0f (for general explanations)
     m_dwriteFactory->CreateTextFormat(
-        family,
-        nullptr,
-        DWRITE_FONT_WEIGHT_REGULAR,
-        DWRITE_FONT_STYLE_NORMAL,
-        DWRITE_FONT_STRETCH_NORMAL,
-        12.0f,
-        L"en-us",
-        &m_bodyFormat
+        m_uiFamily.c_str(), nullptr,
+        DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        10.5f, L"en-us", &m_uiButtonFormat
     );
 
-    // 6. Dialogue format: Medium / Normal, 13.0f (for mascot dialogue bubble)
     m_dwriteFactory->CreateTextFormat(
-        family,
-        nullptr,
-        DWRITE_FONT_WEIGHT_SEMI_BOLD,
-        DWRITE_FONT_STYLE_NORMAL,
-        DWRITE_FONT_STRETCH_NORMAL,
-        13.0f,
-        L"en-us",
-        &m_dialogueFormat
+        m_uiFamily.c_str(), nullptr,
+        DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        9.0f, L"en-us", &m_uiBadgeFormat
     );
 
-    // 7. Badge format: Bold, 10.0f (for pills, status indicators)
     m_dwriteFactory->CreateTextFormat(
-        family,
-        nullptr,
-        DWRITE_FONT_WEIGHT_BOLD,
-        DWRITE_FONT_STYLE_NORMAL,
-        DWRITE_FONT_STRETCH_NORMAL,
-        10.0f,
-        L"en-us",
-        &m_badgeFormat
+        m_uiFamily.c_str(), nullptr,
+        DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        24.0f, L"en-us", &m_uiMetricFormat
     );
 
-    // 8. Code format: Consolas (Monospace is essential for hashes, addresses, hex, disassembly)
+    // --- Monospace Formats (JetBrains Mono) ---
     m_dwriteFactory->CreateTextFormat(
-        L"Consolas",
-        nullptr,
-        DWRITE_FONT_WEIGHT_NORMAL,
-        DWRITE_FONT_STYLE_NORMAL,
-        DWRITE_FONT_STRETCH_NORMAL,
-        10.5f,
-        L"en-us",
-        &m_codeFormat
+        monoFam, monoCol,
+        DWRITE_FONT_WEIGHT_REGULAR, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        10.0f, L"en-us", &m_monoCodeFormat
     );
 
-    // 9. Log format: Consolas, 9.5pt (for dense, high-detail audit logs)
     m_dwriteFactory->CreateTextFormat(
-        L"Consolas",
-        nullptr,
-        DWRITE_FONT_WEIGHT_NORMAL,
-        DWRITE_FONT_STYLE_NORMAL,
-        DWRITE_FONT_STRETCH_NORMAL,
-        9.5f,
-        L"en-us",
-        &m_logFormat
+        monoFam, monoCol,
+        DWRITE_FONT_WEIGHT_REGULAR, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        9.5f, L"en-us", &m_monoLogFormat
+    );
+
+    m_dwriteFactory->CreateTextFormat(
+        monoFam, monoCol,
+        DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        10.0f, L"en-us", &m_monoHeaderFormat
+    );
+
+    m_dwriteFactory->CreateTextFormat(
+        monoFam, monoCol,
+        DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+        9.0f, L"en-us", &m_monoBadgeFormat
     );
 
     return true;
 }
 
 void FontManager::Shutdown() {
-    SafeRelease(m_titleFormat);
-    SafeRelease(m_headerFormat);
-    SafeRelease(m_subheadingFormat);
-    SafeRelease(m_buttonFormat);
-    SafeRelease(m_bodyFormat);
-    SafeRelease(m_dialogueFormat);
-    SafeRelease(m_badgeFormat);
-    SafeRelease(m_codeFormat);
-    SafeRelease(m_logFormat);
+    SafeRelease(m_uiTitleFormat);
+    SafeRelease(m_uiHeaderFormat);
+    SafeRelease(m_uiSubheadingFormat);
+    SafeRelease(m_uiLabelFormat);
+    SafeRelease(m_uiButtonFormat);
+    SafeRelease(m_uiBadgeFormat);
+    SafeRelease(m_uiMetricFormat);
+
+    SafeRelease(m_monoCodeFormat);
+    SafeRelease(m_monoLogFormat);
+    SafeRelease(m_monoHeaderFormat);
+    SafeRelease(m_monoBadgeFormat);
+
+    SafeRelease(m_fontCollection);
 
     for (const auto& path : m_registeredDiskFonts) {
         RemoveFontResourceExW(path.c_str(), FR_PRIVATE, 0);
@@ -272,7 +198,7 @@ void FontManager::Shutdown() {
     }
     m_memFontHandles.clear();
 
-    m_creatoLoaded = false;
+    m_fontLoaded = false;
     m_dwriteFactory = nullptr;
 }
 

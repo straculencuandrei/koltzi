@@ -528,4 +528,183 @@ std::string PeReader::GetMachineString() const {
     }
 }
 
+bool PeReader::DetectInstaller(TriageReport& report) const {
+    if (!m_baseAddress || m_fileSize < 512) return false;
+
+    // 1. Check Section Names
+    for (const auto& sec : m_sections) {
+        if (sec.name == ".ndata") {
+            report.isInstaller = true;
+            report.installerType = "NSIS (Nullsoft Scriptable Install System)";
+            report.AddLog("HEADER", "INFO", "Identified installer section '.ndata' -> NSIS Installer Engine");
+            return true;
+        }
+    }
+
+    // 2. Scan for Known Installer Signatures and Strings in the binary
+    size_t scanLimit = std::min<size_t>(m_fileSize, 32 * 1024 * 1024);
+    const std::string fileData(reinterpret_cast<const char*>(m_baseAddress), scanLimit);
+
+    // Also check trailer / overlay if file is larger than scanLimit
+    std::string trailerData;
+    if (m_fileSize > scanLimit) {
+        size_t trailerSize = std::min<size_t>(m_fileSize - scanLimit, 8 * 1024 * 1024);
+        trailerData.assign(reinterpret_cast<const char*>(m_baseAddress + m_fileSize - trailerSize), trailerSize);
+    }
+
+    auto CaseInsensitiveFind = [](const std::string& haystack, const std::string& needle) {
+        if (needle.empty() || haystack.size() < needle.size()) return false;
+        auto it = std::search(haystack.begin(), haystack.end(), needle.begin(), needle.end(),
+            [](char c1, char c2) { return ::tolower(c1) == ::tolower(c2); });
+        return it != haystack.end();
+    };
+
+    auto SearchBoth = [&](const std::string& needle) {
+        if (CaseInsensitiveFind(fileData, needle)) return true;
+        if (!trailerData.empty() && CaseInsensitiveFind(trailerData, needle)) return true;
+        return false;
+    };
+
+    if (SearchBoth("NullsoftInst") || SearchBoth("Nullsoft.NSIS") || 
+        SearchBoth("nsis.sf.net") || SearchBoth("NSIS Error") ||
+        SearchBoth("~nsu.tmp") || SearchBoth("Custom-made with NSIS")) {
+        report.isInstaller = true;
+        report.installerType = "NSIS (Nullsoft Scriptable Install System)";
+        report.AddLog("HEADER", "INFO", "Identified NSIS Installer signature in binary");
+        return true;
+    }
+
+    if (SearchBoth("Inno Setup Setup Data") || SearchBoth("Inno Setup") || 
+        SearchBoth("InnoSetupLdrWindow") || SearchBoth("jrsoftware.org") ||
+        SearchBoth("InnoCallback") || SearchBoth("InnoSetup")) {
+        report.isInstaller = true;
+        report.installerType = "Inno Setup";
+        report.AddLog("HEADER", "INFO", "Identified Inno Setup Installer signature in binary");
+        return true;
+    }
+
+    if (SearchBoth("WixBundle") || SearchBoth("BurnEngine") || 
+        SearchBoth("WiX Toolset") || SearchBoth("WixBundleElevated") ||
+        SearchBoth("wixstdba") || SearchBoth("WixBundleName") ||
+        SearchBoth("WixBundleManufacturer") || SearchBoth("WixBundleOriginalSource") ||
+        SearchBoth("WixBundleAction")) {
+        report.isInstaller = true;
+        report.installerType = "WiX Toolset / Burn Bootstrapper";
+        report.AddLog("HEADER", "INFO", "Identified WiX / Burn Engine signature in binary");
+        return true;
+    }
+
+    if (SearchBoth("InstallShield") || SearchBoth("ISSetup") || 
+        SearchBoth("InstallEngine") || SearchBoth("Setup.inx") ||
+        SearchBoth("_isres.dll") || SearchBoth("InstallShield Software Corporation")) {
+        report.isInstaller = true;
+        report.installerType = "InstallShield";
+        report.AddLog("HEADER", "INFO", "Identified InstallShield package in binary");
+        return true;
+    }
+
+    if (SearchBoth("Advanced Installer") || SearchBoth("Caphyon") ||
+        SearchBoth("AI_Setup") || SearchBoth("AdvancedInstaller")) {
+        report.isInstaller = true;
+        report.installerType = "Advanced Installer";
+        report.AddLog("HEADER", "INFO", "Identified Advanced Installer signature in binary");
+        return true;
+    }
+
+    if (SearchBoth("WiseMain") || SearchBoth("Wise Installation") || SearchBoth("Wise Solutions")) {
+        report.isInstaller = true;
+        report.installerType = "Wise Installation System";
+        report.AddLog("HEADER", "INFO", "Identified Wise Installation signature in binary");
+        return true;
+    }
+
+    if (SearchBoth("7-Zip SFX") || SearchBoth("WinRAR SFX") || 
+        SearchBoth("Rar!") || SearchBoth("SFX by WinRAR") ||
+        SearchBoth("7zS.sfx") || SearchBoth("7zS2.sfx") || SearchBoth("SFX Module")) {
+        report.isInstaller = true;
+        report.installerType = "Self-Extracting Archive (SFX Installer)";
+        report.AddLog("HEADER", "INFO", "Identified SFX Installer archive in binary");
+        return true;
+    }
+
+    if (SearchBoth("Squirrel.Windows") || SearchBoth("SquirrelUpdate") ||
+        SearchBoth("Update.exe") || SearchBoth("app.asar") ||
+        SearchBoth("resources.pak") || SearchBoth("electron.asar")) {
+        report.isInstaller = true;
+        report.installerType = "Modern App Installer / Electron Bootstrapper";
+        report.AddLog("HEADER", "INFO", "Identified Squirrel / Electron installer framework in binary");
+        return true;
+    }
+
+    if (SearchBoth("ClickOnce") || SearchBoth("Microsoft.VisualStudio.Setup") ||
+        SearchBoth("vs_setup") || SearchBoth("vs_installer") || SearchBoth("InstallBuilder")) {
+        report.isInstaller = true;
+        report.installerType = "Application Setup & Deployment Package";
+        report.AddLog("HEADER", "INFO", "Identified Application Deployment package in binary");
+        return true;
+    }
+
+    // 3. Imports check: Dedicated Setup & Installer Windows Libraries
+    for (const auto& imp : m_imports) {
+        std::string lowerDll = imp.dllName;
+        std::transform(lowerDll.begin(), lowerDll.end(), lowerDll.begin(), [](unsigned char c) { return (char)::tolower(c); });
+        if (lowerDll == "msi.dll" || lowerDll == "setupapi.dll" || lowerDll == "advpack.dll" || lowerDll == "cabinet.dll") {
+            report.isInstaller = true;
+            report.installerType = "Windows Installer / Setup Package (" + imp.dllName + ")";
+            report.AddLog("HEADER", "INFO", "Identified Windows Setup library import: " + imp.dllName);
+            return true;
+        }
+    }
+
+    // 4. Authenticode certificate subject check (trusted software installer)
+    if (report.signature.isSigned && !report.signature.signerSubject.empty()) {
+        std::string subj = report.signature.signerSubject;
+        std::string lowerSubj = subj;
+        std::transform(lowerSubj.begin(), lowerSubj.end(), lowerSubj.begin(), [](unsigned char c) { return (char)::tolower(c); });
+        if (lowerSubj.find("setup") != std::string::npos || lowerSubj.find("installer") != std::string::npos ||
+            lowerSubj.find("installation") != std::string::npos) {
+            report.isInstaller = true;
+            report.installerType = "Digitally Signed Setup (" + subj + ")";
+            report.AddLog("HEADER", "INFO", "Identified setup package via digital certificate subject: " + subj);
+            return true;
+        }
+    }
+
+    // 5. Heuristic: Setup/Installer Filename + File Extraction APIs
+    std::string lowerName = report.fileName;
+    std::transform(lowerName.begin(), lowerName.end(), lowerName.begin(), [](unsigned char c) { return (char)::tolower(c); });
+    bool nameIsSetup = (lowerName.find("setup") != std::string::npos ||
+                        lowerName.find("install") != std::string::npos ||
+                        lowerName.find("installer") != std::string::npos ||
+                        lowerName.find("updater") != std::string::npos ||
+                        lowerName.find("update") != std::string::npos ||
+                        lowerName.find("patch") != std::string::npos ||
+                        lowerName.find("vcredist") != std::string::npos ||
+                        lowerName.find("wizard") != std::string::npos);
+
+    bool hasExtractApis = false;
+    for (const auto& imp : m_imports) {
+        for (const auto& fn : imp.functions) {
+            std::string lowerFn = fn;
+            std::transform(lowerFn.begin(), lowerFn.end(), lowerFn.begin(), [](unsigned char c) { return (char)::tolower(c); });
+            if (lowerFn == "setupiteratecabinetw" || lowerFn == "msiinstallproductw" ||
+                lowerFn == "createfilew" || lowerFn == "writefile" || lowerFn == "movefileexw" ||
+                lowerFn == "copyfilew" || lowerFn == "copyfileexw") {
+                hasExtractApis = true;
+                break;
+            }
+        }
+        if (hasExtractApis) break;
+    }
+
+    if (nameIsSetup && (hasExtractApis || report.signature.isTrustedVendor || report.signature.isValid)) {
+        report.isInstaller = true;
+        report.installerType = "Setup / Installation Utility";
+        report.AddLog("HEADER", "INFO", "Heuristically identified software setup / update package");
+        return true;
+    }
+
+    return false;
+}
+
 } // namespace Koltzi

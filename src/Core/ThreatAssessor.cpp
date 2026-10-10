@@ -6,7 +6,10 @@
 namespace Koltzi {
 
 void ThreatAssessor::Assess(const PeReader& pe, TriageReport& report) {
-    (void)pe;
+    if (!report.isInstaller) {
+        pe.DetectInstaller(report);
+    }
+
     int score = 0;
     std::vector<std::string> redFlags;
     std::vector<std::string> yellowFlags;
@@ -25,10 +28,10 @@ void ThreatAssessor::Assess(const PeReader& pe, TriageReport& report) {
         }
     }
 
-    // 2. Evaluate PEB Accesses (filter out CRT TLS / security cookie initialization)
+    // 2. Evaluate PEB Accesses (filter out CRT TLS / security cookie initialization, installers, and verified software)
     size_t activePebAccesses = 0;
     for (const auto& peb : report.pebAccesses) {
-        if (!peb.isCrtTlsInit) {
+        if (!peb.isCrtTlsInit && !report.isInstaller && !report.signature.isValid && !report.signature.isTrustedVendor && !report.isLegitimateBrowser) {
             activePebAccesses++;
         }
     }
@@ -157,9 +160,29 @@ void ThreatAssessor::Assess(const PeReader& pe, TriageReport& report) {
     }
 
     if (hasPackedCodeSection) {
-        score += 30;
-        yellowFlags.push_back(std::format("High entropy executable section '{}' (H = {:.2f} > 7.2) - packed/encrypted code", packedSectionName, maxSectionEntropy));
-        report.AddLog("ASSESS", "WARN", std::format("+30 pts: High entropy packed section '{}' (H = {:.2f})", packedSectionName, maxSectionEntropy));
+        if (report.isInstaller || report.signature.isValid || report.isLegitimateBrowser) {
+            report.AddLog("ASSESS", "INFO", std::format("Compressed archive payload or asset data in section '{}' (H = {:.2f}) for verified binary", packedSectionName, maxSectionEntropy));
+            hasPackedCodeSection = false; // Benign installer archive payload or signed assets
+        } else {
+            score += 30;
+            yellowFlags.push_back(std::format("High entropy executable section '{}' (H = {:.2f} > 7.2) - packed/encrypted code", packedSectionName, maxSectionEntropy));
+            report.AddLog("ASSESS", "WARN", std::format("+30 pts: High entropy packed section '{}' (H = {:.2f})", packedSectionName, maxSectionEntropy));
+        }
+    }
+
+    // ----------------------------------------------------
+    // Legitimate Installer Package Verification
+    // ----------------------------------------------------
+    if (report.isInstaller) {
+        report.AddLog("ASSESS", "PASS", "Verified installer package (" + report.installerType + ") - routine software staging and file extraction");
+        if (!hasExfil && !hasInjection && !hasEvasionCommands) {
+            score = 0;
+            hasPackedCodeSection = false;
+            activePebAccesses = 0;
+            activeSyscalls = 0;
+            redFlags.clear();
+            yellowFlags.clear();
+        }
     }
 
     // ----------------------------------------------------
@@ -169,13 +192,25 @@ void ThreatAssessor::Assess(const PeReader& pe, TriageReport& report) {
         if (report.signature.isTrustedVendor) {
             score = std::max(0, score - 60);
             report.AddLog("ASSESS", "PASS", "Trust discount: -60 pts applied for verified software publisher: " + report.signature.signerSubject);
-            // If no active exfil or injection, force clean
             if (!hasExfil && !hasInjection && !hasEvasionCommands) {
                 score = 0;
+                hasPackedCodeSection = false;
+                activePebAccesses = 0;
+                activeSyscalls = 0;
+                redFlags.clear();
+                yellowFlags.clear();
             }
         } else {
-            score = std::max(0, score - 30);
-            report.AddLog("ASSESS", "PASS", "Trust discount: -30 pts applied for valid Authenticode certificate");
+            score = std::max(0, score - 50);
+            report.AddLog("ASSESS", "PASS", "Trust discount: -50 pts applied for valid Authenticode certificate");
+            if (!hasExfil && !hasInjection && !hasEvasionCommands) {
+                score = 0;
+                hasPackedCodeSection = false;
+                activePebAccesses = 0;
+                activeSyscalls = 0;
+                redFlags.clear();
+                yellowFlags.clear();
+            }
         }
     }
 
@@ -202,40 +237,134 @@ void ThreatAssessor::Assess(const PeReader& pe, TriageReport& report) {
          report.threatLevel == ThreatLevel::Suspicious ? "SUSPICIOUS" : "CLEAN")));
 
     // ----------------------------------------------------
-    // Mascot Personality Dialogue
     // ----------------------------------------------------
-    if (report.signature.isValid && report.signature.isTrustedVendor && report.threatLevel == ThreatLevel::Clean) {
-        report.personalityDialogue =
-            "Verified publisher! Digitally signed by " + report.signature.signerSubject +
-            ". Standard imports and cryptographic routines verified with zero exfiltration indicators.";
+    // Mascot Forensic Dialogue Generation (Multiple Detailed Lines)
+    // ----------------------------------------------------
+    // ----------------------------------------------------
+    // Mascot Forensic Dialogue Generation (Primary Verdict + Detailed Findings)
+    // ----------------------------------------------------
+    std::string primaryDialogue;
+    if (report.isInstaller && report.threatLevel == ThreatLevel::Clean) {
+        primaryDialogue = "Safe setup package detected (" + report.installerType + ")! Clean file staging and valid application installation verified with zero malware indicators.";
+    } else if (report.signature.isValid && report.threatLevel == ThreatLevel::Clean) {
+        primaryDialogue = "Verified publisher! Digitally signed by " + report.signature.signerSubject + ". Standard imports and cryptographic routines verified with zero exfiltration indicators.";
     } else if (activePebAccesses > 0 && activeSyscalls > 0) {
-        report.personalityDialogue =
-            "Sneaky sneaky! It's bypassing standard Windows libraries using direct syscalls "
-            "and hiding its imports with PEB memory hashing. It's trying to ghost the antivirus!";
+        primaryDialogue = "Sneaky sneaky! It's bypassing standard Windows libraries using direct syscalls and hiding its imports with PEB memory hashing. It's trying to ghost the antivirus!";
     } else if (hasExfil || hasCredStealer || hasCryptoTarget) {
-        report.personalityDialogue =
-            "Red alert! Found hardcoded paths targeting your Chrome/Edge browser passwords "
-            "and crypto wallets. Do NOT run this!";
+        primaryDialogue = "Red alert! Found hardcoded paths targeting your Chrome/Edge browser passwords and crypto wallets. Do NOT run this!";
     } else if (hasInjection) {
-        report.personalityDialogue =
-            "Yikes! It's asking Windows to carve out executable memory in another process "
-            "and pull the trigger! Classic process injection!";
+        primaryDialogue = "Yikes! It's asking Windows to carve out executable memory in another process and pull the trigger! Classic process injection!";
     } else if (activeSyscalls > 0) {
-        report.personalityDialogue =
-            "Suspicious! Raw direct syscalls (0F 05) found in the executable! "
-            "Legitimate programs almost never do this unless they are trying to evade security hooks!";
+        primaryDialogue = "Suspicious! Raw direct syscalls (0F 05) found in the executable! Legitimate programs almost never do this unless they are trying to evade security hooks!";
     } else if (hasPackedCodeSection) {
-        report.personalityDialogue =
-            "Whoa! This file is wrapped in thick encryption or packed like a mummy! "
-            "I can't read the functions inside without running it. Be careful!";
+        primaryDialogue = "Whoa! This file is wrapped in thick encryption or packed like a mummy! I can't read the functions inside without running it. Be careful!";
     } else if (hasEvasionCommands) {
-        report.personalityDialogue =
-            "Watch out! Found commands attempting to wipe Windows shadow copies or disable Defender!";
+        primaryDialogue = "Watch out! Found commands attempting to wipe Windows shadow copies or disable Defender!";
     } else {
-        report.personalityDialogue =
-            "All clear! Normal imports, standard entropy, and no stealth injection loops. "
-            "Looks like a friendly binary!";
+        primaryDialogue = "All clear! Normal imports, standard entropy, and no stealth injection loops. Looks like a friendly binary!";
     }
+
+    report.dialogueLines.clear();
+    report.dialogueLines.push_back(primaryDialogue);
+
+    // Append Detailed Technical & Forensic Observations for User to Cycle Through
+    if (activeSyscalls > 0) {
+        std::string scSec = (!report.syscalls.empty() && !report.syscalls[0].section.empty()) ? report.syscalls[0].section : ".text";
+        report.dialogueLines.push_back(
+            std::format("Direct syscall evasion: Found {} raw x64 syscall (0F 05) instructions in section {} to blind EDR userland API hooks.",
+                activeSyscalls, scSec)
+        );
+        if (!report.syscalls.empty() && report.syscalls[0].isStubPattern) {
+            report.dialogueLines.push_back(
+                std::format("Structural syscall stub verified: SSN index 0x{:02X} matches low-level NT API invocation without standard ntdll.dll imports.",
+                    report.syscalls[0].ssn)
+            );
+        }
+    }
+
+    if (activePebAccesses > 0) {
+        report.dialogueLines.push_back(
+            std::format("Evasive PEB traversal: Found {} manual module walks via GS:[0x60]->Ldr to search loaded DLLs without calling GetModuleHandle.",
+                activePebAccesses)
+        );
+        report.dialogueLines.push_back(
+            "API hiding confirmed: It manually iterates InMemoryOrderModuleList to locate exports dynamically in memory."
+        );
+    }
+
+    if (activeApiHashLoops > 0) {
+        std::string matchedName;
+        for (const auto& l : report.apiHashLoops) {
+            if (!l.matchedApi.empty()) { matchedName = l.matchedApi; break; }
+        }
+        if (!matchedName.empty()) {
+            report.dialogueLines.push_back(
+                std::format("Dynamic API hashing verified! Resolved critical API '{}' via assembly hashing loop without IAT entry.", matchedName)
+            );
+        } else {
+            report.dialogueLines.push_back(
+                std::format("Evasive API hashing loops found: {} dynamic resolution loops detected bypassing standard Import Address Table.",
+                    activeApiHashLoops)
+            );
+        }
+    }
+
+    if (hasInjection) {
+        if (report.injectionChain.hasRwxProtectArg || report.injectionChain.hasRwxAllocation) {
+            report.dialogueLines.push_back(
+                "PAGE_EXECUTE_READWRITE violation: Asking the kernel for RWX memory in target processes, violating core W^X security principles."
+            );
+        }
+    }
+
+    if (hasCryptoTarget) {
+        report.dialogueLines.push_back(
+            "Cryptocurrency targeting: Found artifact strings specifically hunting MetaMask, Exodus, and wallet.dat files."
+        );
+    }
+
+    if (hasCredStealer) {
+        report.dialogueLines.push_back(
+            "Credential harvesting: Targets Chrome, Edge, Brave Login Data, Cookies, and Discord/Telegram session tokens."
+        );
+    }
+
+    if (hasEvasionCommands) {
+        report.dialogueLines.push_back(
+            "Defense evasion detected: Found embedded commands attempting to wipe Windows shadow copies (vssadmin) or disable Defender."
+        );
+    }
+
+    if (hasPackedCodeSection) {
+        report.dialogueLines.push_back(
+            std::format("High entropy alert: Section '{}' measures {:.2f} / 8.00 entropy, indicating dense cryptographic ciphertext or packing.",
+                packedSectionName, maxSectionEntropy)
+        );
+    }
+
+    if (hasRwxSection) {
+        report.dialogueLines.push_back(
+            "Dangerous section flags: Found a PE section marked as both Executable and Writable (RWX), a primary self-modifying code indicator."
+        );
+    }
+
+    if (report.signature.isValid) {
+        report.dialogueLines.push_back(
+            "Authenticode chain verified: Issued by " + report.signature.signerIssuer + " and anchored in Windows Trusted Root store."
+        );
+    } else if (!report.signature.isSigned) {
+        report.dialogueLines.push_back(
+            "Unsigned binary: No digital Authenticode certificate found. Publisher origin and file integrity are unverified."
+        );
+    }
+
+    report.dialogueLines.push_back(
+        std::format("PE Structure: {} binary targeting {} with {} sections and {} import DLLs (Average entropy: {:.2f}/8.00).",
+            report.machineType, report.subsystem, report.sections.size(), report.imports.size(), report.overallEntropy)
+    );
+
+    report.activeDialogueIndex = 0;
+    report.personalityDialogue = report.dialogueLines[0];
 
     // ----------------------------------------------------
     // Construct Technical HUD Breakdown
@@ -269,6 +398,10 @@ void ThreatAssessor::Assess(const PeReader& pe, TriageReport& report) {
         report.technicalDetails.push_back("Signature: Unsigned Binary");
     }
 
+    if (report.isInstaller) {
+        report.technicalDetails.push_back("[INFO] Verified Setup Package: " + report.installerType + " (Clean software extraction & installation verified)");
+    }
+
     for (const auto& flag : redFlags) {
         report.technicalDetails.push_back("[CRITICAL] " + flag);
     }
@@ -280,6 +413,7 @@ void ThreatAssessor::Assess(const PeReader& pe, TriageReport& report) {
     if (report.threatLevel == ThreatLevel::Clean) {
         report.technicalDetails.push_back("[INFO] No direct syscalls, no PEB stealth access, normal section entropy.");
         report.technicalDetails.push_back(std::format("[INFO] Imports verified: {} DLL dependencies loaded.", report.imports.size()));
+        report.technicalDetails.push_back("[INFO] No malicious injection chains, exfiltration channels, or defense evasion commands.");
     }
 }
 

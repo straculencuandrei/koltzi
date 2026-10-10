@@ -28,6 +28,10 @@ public:
     // Synchronous CLI triage (for automated tests or headless inspection)
     bool TriageFileCli(const std::wstring& filePath);
 
+    // Synchronous JSON triage (for Web API / headless automation)
+    bool TriageFileJson(const std::wstring& filePath);
+    bool TriageSampleJson(const std::string& sampleType);
+
 private:
     void SetupCallbacks();
     void OnWorkerCompleted(std::shared_ptr<TriageReport> report);

@@ -1,5 +1,6 @@
 #include "SpeechBubble.h"
 #include <algorithm>
+#include <format>
 
 namespace Koltzi {
 
@@ -11,64 +12,65 @@ SpeechBubble::~SpeechBubble() {
     DiscardDeviceResources();
 }
 
-HRESULT SpeechBubble::Initialize(ID2D1RenderTarget* rt, IDWriteFactory* dwriteFactory, const std::wstring& fontFamily) {
+HRESULT SpeechBubble::Initialize(ID2D1RenderTarget* rt, IDWriteFactory* dwriteFactory, IDWriteFontCollection* fontCollection, const std::wstring& fontFamily) {
     DiscardDeviceResources();
     m_dwriteFactory = dwriteFactory;
     rt->GetFactory(&m_d2dFactory);
 
     HRESULT hr = S_OK;
 
-    hr = rt->CreateSolidColorBrush(D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f), &m_textWhiteBrush);
+    // Black Metallic Chrome Brushes
+    hr = rt->CreateSolidColorBrush(D2D1::ColorF(0.953f, 0.957f, 0.965f, 1.0f), &m_textWhiteBrush);
     if (FAILED(hr)) return hr;
 
-    hr = rt->CreateSolidColorBrush(D2D1::ColorF(0.58f, 0.65f, 0.75f, 1.0f), &m_textMutedBrush);
+    hr = rt->CreateSolidColorBrush(D2D1::ColorF(0.612f, 0.639f, 0.686f, 1.0f), &m_textMutedBrush);
     if (FAILED(hr)) return hr;
 
-    hr = rt->CreateSolidColorBrush(D2D1::ColorF(0.22f, 0.74f, 0.97f, 1.0f), &m_accentBrush);
+    hr = rt->CreateSolidColorBrush(D2D1::ColorF(0.220f, 0.741f, 0.973f, 1.0f), &m_accentBrush);
     if (FAILED(hr)) return hr;
 
-    hr = rt->CreateSolidColorBrush(D2D1::ColorF(0.06f, 0.09f, 0.16f, 0.93f), &m_bgBrush);
+    hr = rt->CreateSolidColorBrush(D2D1::ColorF(0.051f, 0.063f, 0.086f, 0.96f), &m_bgBrush);
     if (FAILED(hr)) return hr;
 
-    hr = rt->CreateSolidColorBrush(D2D1::ColorF(0.22f, 0.74f, 0.97f, 0.85f), &m_borderBrush);
+    hr = rt->CreateSolidColorBrush(D2D1::ColorF(0.173f, 0.200f, 0.259f, 0.90f), &m_borderBrush);
     if (FAILED(hr)) return hr;
 
     if (m_dwriteFactory) {
-        const wchar_t* family = fontFamily.empty() ? L"Segoe UI" : fontFamily.c_str();
+        const wchar_t* family = fontFamily.empty() ? L"JetBrains Mono" : fontFamily.c_str();
 
         // Badge format
         m_dwriteFactory->CreateTextFormat(
-            family, nullptr,
+            family, fontCollection,
             DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-            10.5f, L"en-us", &m_badgeFormat
+            9.5f, L"en-us", &m_badgeFormat
         );
 
         // Dialogue format
         m_dwriteFactory->CreateTextFormat(
-            family, nullptr,
-            DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-            13.5f, L"en-us", &m_dialogueFormat
+            family, fontCollection,
+            DWRITE_FONT_WEIGHT_MEDIUM, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
+            11.5f, L"en-us", &m_dialogueFormat
         );
 
         // HUD Heading format
         m_dwriteFactory->CreateTextFormat(
-            family, nullptr,
+            family, fontCollection,
             DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
             12.0f, L"en-us", &m_hudHeadingFormat
         );
 
         // HUD Body format
         m_dwriteFactory->CreateTextFormat(
-            family, nullptr,
+            family, fontCollection,
             DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-            11.0f, L"en-us", &m_hudTextFormat
+            10.5f, L"en-us", &m_hudTextFormat
         );
 
         // HUD Code format
         m_dwriteFactory->CreateTextFormat(
-            L"Consolas", nullptr,
+            family, fontCollection,
             DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL,
-            10.5f, L"en-us", &m_hudCodeFormat
+            10.0f, L"en-us", &m_hudCodeFormat
         );
     }
 
@@ -142,34 +144,39 @@ void SpeechBubble::Render(ID2D1RenderTarget* rt, const TriageReport* currentRepo
     RenderAt(rt, D2D1::RectF(24.0f, 250.0f, 324.0f, 420.0f), currentMood);
 }
 
-void SpeechBubble::RenderAt(ID2D1RenderTarget* rt, const D2D1_RECT_F& cardRect, GhostMood mood) {
+void SpeechBubble::RenderAt(ID2D1RenderTarget* rt, const D2D1_RECT_F& cardRect, GhostMood mood, bool isInstaller) {
     if (!rt) return;
 
     // Determine mood color
     D2D1_COLOR_F glowColor;
     std::wstring badgeText;
-    switch (mood) {
-    case GhostMood::Alarmed:
-        glowColor = D2D1::ColorF(0.94f, 0.27f, 0.27f, 0.90f);
-        badgeText = L"[THREAT: MALICIOUS]";
-        break;
-    case GhostMood::Puzzled:
-        glowColor = D2D1::ColorF(0.96f, 0.62f, 0.04f, 0.90f);
-        badgeText = L"[STATUS: SUSPICIOUS / PACKED]";
-        break;
-    case GhostMood::Happy:
-        glowColor = D2D1::ColorF(0.06f, 0.73f, 0.51f, 0.90f);
-        badgeText = L"[STATUS: ALL CLEAR / BENIGN]";
-        break;
-    case GhostMood::Sniffing:
-        glowColor = D2D1::ColorF(0.18f, 0.83f, 0.75f, 0.90f);
-        badgeText = L"[ANALYZING PE INSTRUCTIONS...]";
-        break;
-    case GhostMood::Idle:
-    default:
-        glowColor = D2D1::ColorF(0.22f, 0.74f, 0.97f, 0.80f);
-        badgeText = L"[KOLTZI // OFFLINE TRIAGE]";
-        break;
+    if (isInstaller && (mood == GhostMood::Happy || mood == GhostMood::Idle)) {
+        glowColor = D2D1::ColorF(0.06f, 0.65f, 0.92f, 0.90f);
+        badgeText = L"[VERIFIED SETUP PACKAGE]";
+    } else {
+        switch (mood) {
+        case GhostMood::Alarmed:
+            glowColor = D2D1::ColorF(0.94f, 0.27f, 0.27f, 0.90f);
+            badgeText = L"[THREAT: MALICIOUS]";
+            break;
+        case GhostMood::Puzzled:
+            glowColor = D2D1::ColorF(0.96f, 0.62f, 0.04f, 0.90f);
+            badgeText = L"[STATUS: SUSPICIOUS / PACKED]";
+            break;
+        case GhostMood::Happy:
+            glowColor = D2D1::ColorF(0.06f, 0.73f, 0.51f, 0.90f);
+            badgeText = L"[STATUS: ALL CLEAR / BENIGN]";
+            break;
+        case GhostMood::Sniffing:
+            glowColor = D2D1::ColorF(0.18f, 0.83f, 0.75f, 0.90f);
+            badgeText = L"[ANALYZING PE INSTRUCTIONS...]";
+            break;
+        case GhostMood::Idle:
+        default:
+            glowColor = D2D1::ColorF(0.22f, 0.74f, 0.97f, 0.80f);
+            badgeText = L"[KOLTZI // OFFLINE TRIAGE]";
+            break;
+        }
     }
 
     m_currentBounds = cardRect;
@@ -195,22 +202,19 @@ void SpeechBubble::RenderGlassBackground(ID2D1RenderTarget* rt, const D2D1_RECT_
     m_bgBrush->SetColor(D2D1::ColorF(0.06f, 0.09f, 0.16f, 0.94f));
     rt->FillRoundedRectangle(rrect, m_bgBrush);
 
-    // Subtle inner gradient or glowing border
+    // Subtle inner glowing border
     m_borderBrush->SetColor(glowColor);
     rt->DrawRoundedRectangle(rrect, m_borderBrush, 1.8f);
 
-    // Soft outer glow accent line at top
-    ID2D1SolidColorBrush* topGlow = nullptr;
-    rt->CreateSolidColorBrush(D2D1::ColorF(glowColor.r, glowColor.g, glowColor.b, 0.4f), &topGlow);
-    if (topGlow) {
-        rt->DrawLine(
-            D2D1::Point2F(rect.left + 16.0f, rect.top + 1.0f),
-            D2D1::Point2F(rect.right - 16.0f, rect.top + 1.0f),
-            topGlow,
-            2.5f
-        );
-        SafeRelease(topGlow);
-    }
+    // Soft top accent highlight line using cached brush
+    m_borderBrush->SetColor(D2D1::ColorF(glowColor.r, glowColor.g, glowColor.b, 0.45f));
+    rt->DrawLine(
+        D2D1::Point2F(rect.left + 16.0f, rect.top + 1.0f),
+        D2D1::Point2F(rect.right - 16.0f, rect.top + 1.0f),
+        m_borderBrush,
+        2.5f
+    );
+    m_borderBrush->SetColor(glowColor);
 }
 
 void SpeechBubble::RenderTail(ID2D1RenderTarget* rt, float tailStartX, float tailStartY, D2D1_COLOR_F glowColor) {
@@ -244,7 +248,7 @@ void SpeechBubble::RenderBadge(ID2D1RenderTarget* rt, const D2D1_RECT_F& badgeRe
     rt->CreateSolidColorBrush(D2D1::ColorF(color.r, color.g, color.b, 0.16f), &pillBg);
     if (pillBg) {
         D2D1_ROUNDED_RECT pill = D2D1::RoundedRect(
-            D2D1::RectF(badgeRect.left, badgeRect.top, badgeRect.left + 240.0f, badgeRect.bottom),
+            D2D1::RectF(badgeRect.left, badgeRect.top, badgeRect.left + 215.0f, badgeRect.bottom),
             4.0f, 4.0f
         );
         rt->FillRoundedRectangle(pill, pillBg);
@@ -256,9 +260,23 @@ void SpeechBubble::RenderBadge(ID2D1RenderTarget* rt, const D2D1_RECT_F& badgeRe
         text.c_str(),
         (UINT32)text.size(),
         m_badgeFormat,
-        D2D1::RectF(badgeRect.left + 6.0f, badgeRect.top + 2.0f, badgeRect.right, badgeRect.bottom),
+        D2D1::RectF(badgeRect.left + 6.0f, badgeRect.top + 2.0f, badgeRect.left + 210.0f, badgeRect.bottom),
         m_accentBrush
     );
+
+    if (m_noteTotal > 1 && m_textMutedBrush) {
+        std::wstring notePrompt = std::format(L"NOTE {}/{} [CLICK]", m_noteIndex + 1, m_noteTotal);
+        DWRITE_TEXT_ALIGNMENT old = m_badgeFormat->GetTextAlignment();
+        m_badgeFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_TRAILING);
+        rt->DrawText(
+            notePrompt.c_str(),
+            (UINT32)notePrompt.size(),
+            m_badgeFormat,
+            D2D1::RectF(badgeRect.left, badgeRect.top + 2.0f, badgeRect.right - 4.0f, badgeRect.bottom),
+            m_textMutedBrush
+        );
+        m_badgeFormat->SetTextAlignment(old);
+    }
 }
 
 void SpeechBubble::RenderDialogueText(ID2D1RenderTarget* rt, const D2D1_RECT_F& textRect) {
@@ -266,9 +284,11 @@ void SpeechBubble::RenderDialogueText(ID2D1RenderTarget* rt, const D2D1_RECT_F& 
 
     std::wstring revealed = m_fullDialogueWide.substr(0, m_visibleChars);
 
-    // Append typewriter cursor if still typing or blinking
-    if (m_isTyping || (m_cursorBlink < 0.4f && m_visibleChars < m_fullDialogueWide.size())) {
-        revealed += L" ▌";
+    // Append modern typing cursor
+    if (m_isTyping) {
+        revealed += L" _";
+    } else if (m_cursorBlink < 0.45f && m_visibleChars < m_fullDialogueWide.size()) {
+        revealed += L" |";
     }
 
     rt->DrawText(

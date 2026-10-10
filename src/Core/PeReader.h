@@ -49,6 +49,9 @@ public:
     // Section raw bytes accessor
     bool GetSectionBytes(const SectionInfo& sec, const uint8_t*& outBytes, size_t& outSize) const;
 
+    // Detect legitimate installer runtimes (NSIS, Inno Setup, WiX, InstallShield, SFX)
+    bool DetectInstaller(TriageReport& report) const;
+
     static double CalculateEntropy(const uint8_t* data, size_t length);
 
 private:

@@ -140,7 +140,32 @@ bool CryptoVerifier::CheckKnownTrustedSigner(const std::string& subject) {
         "github, inc",
         "electronic arts",
         "adobe inc",
-        "nvidia corporation"
+        "nvidia corporation",
+        "piriform",
+        "ccleaner",
+        "iobit",
+        "jetbrains",
+        "oracle",
+        "spotify",
+        "slack technologies",
+        "epic games",
+        "unity technologies",
+        "amazon.com",
+        "intel corporation",
+        "advanced micro devices",
+        "amd",
+        "logitech",
+        "corsair",
+        "zoom video",
+        "dropbox",
+        "vmware",
+        "anydesk",
+        "teamviewer",
+        "realtek",
+        "sysinternals",
+        "nullsoft",
+        "jrsoftware",
+        "inno setup"
     };
 
     for (const char* signer : trustedSigners) {

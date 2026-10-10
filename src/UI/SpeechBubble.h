@@ -13,14 +13,15 @@ public:
     SpeechBubble();
     ~SpeechBubble();
 
-    HRESULT Initialize(ID2D1RenderTarget* rt, IDWriteFactory* dwriteFactory, const std::wstring& fontFamily = L"Creato Display");
+    HRESULT Initialize(ID2D1RenderTarget* rt, IDWriteFactory* dwriteFactory, IDWriteFontCollection* fontCollection = nullptr, const std::wstring& fontFamily = L"JetBrains Mono");
     void DiscardDeviceResources();
 
     void Update(float deltaSeconds);
     void Render(ID2D1RenderTarget* rt, const TriageReport* currentReport, GhostMood currentMood);
-    void RenderAt(ID2D1RenderTarget* rt, const D2D1_RECT_F& cardRect, GhostMood currentMood);
+    void RenderAt(ID2D1RenderTarget* rt, const D2D1_RECT_F& cardRect, GhostMood currentMood, bool isInstaller = false);
 
     void SetDialogue(const std::string& text, bool immediate = false);
+    void SetNoteCounter(size_t current, size_t total) { m_noteIndex = current; m_noteTotal = total; }
     void ToggleExpandedDetails();
     bool IsExpanded() const { return m_showExpandedDetails; }
 
@@ -58,7 +59,9 @@ private:
 
     // Expandable details toggle
     bool m_showExpandedDetails = false;
-    float m_expandedAnim = 0.0f; // 0 to 1 smooth expansion
+    float m_expandedAnim = 0.0f;
+    size_t m_noteIndex = 0;
+    size_t m_noteTotal = 0;
 
     D2D1_RECT_F m_currentBounds = { 0, 0, 0, 0 };
 };

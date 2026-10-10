@@ -676,6 +676,60 @@ void TestProcessInjectionCoLocationAndRwx() {
     std::cout << "  [PASS] Process Injection RWX parameter recovery passed (hasRwxProtectArg=TRUE)\n";
 }
 
+static void TestInstallerFalsePositiveElimination() {
+    std::cout << "[TEST] Running Legitimate Installer False-Positive Elimination test...\n";
+
+    std::string sig = "Inno Setup Setup Data v6.2.0";
+    std::vector<uint8_t> data(sig.begin(), sig.end());
+    data.push_back(0);
+
+    // Append high entropy data mimicking compressed setup payload
+    std::mt19937 rng(42);
+    for (int i = 0; i < 4096; ++i) {
+        data.push_back(static_cast<uint8_t>(rng() & 0xFF));
+    }
+
+    std::vector<uint8_t> code = {
+        0x48, 0x83, 0xEC, 0x28,                         // sub rsp, 0x28
+        0xFF, 0x15, 0x00, 0x10, 0x00, 0x00,             // call [WriteFile]
+        0xFF, 0x15, 0x08, 0x10, 0x00, 0x00,             // call [CreateThread]
+        0x48, 0x83, 0xC4, 0x28,                         // add rsp, 0x28
+        0xC3                                            // ret
+    };
+
+    auto peBytes = BuildTestPe64(code, data, "kernel32.dll", { "WriteFile", "CreateThread" });
+
+    PeReader pe;
+    TEST_ASSERT(pe.OpenMemory(peBytes.data(), peBytes.size(), L"setup.exe") == true);
+
+    TriageReport report;
+    report.fileName = "setup.exe";
+    report.sections = pe.GetSections();
+    report.imports = pe.GetImports();
+
+    pe.DetectInstaller(report);
+    TEST_ASSERT(report.isInstaller == true);
+    TEST_ASSERT(report.installerType.find("Inno Setup") != std::string::npos);
+
+    InstructionScanner is;
+    is.Scan(pe, report);
+
+    TEST_ASSERT(report.injectionChain.detected == false);
+    TEST_ASSERT(report.injectionChain.isCoLocated == false);
+
+    ThreatAssessor::Assess(pe, report);
+
+    TEST_ASSERT(report.threatLevel == ThreatLevel::Clean);
+    TEST_ASSERT(report.threatScore == 0);
+    TEST_ASSERT(report.mood == GhostMood::Happy);
+
+    for (const auto& line : report.technicalDetails) {
+        TEST_ASSERT(line.find("[CRITICAL]") == std::string::npos);
+    }
+
+    std::cout << "  [PASS] Installer false-positive elimination passed: CLEAN / HAPPY (Threat Score: 0 / 100)\n";
+}
+
 int main(int argc, char* argv[]) {
     if (argc >= 2) {
         std::string pathStr = argv[1];
@@ -697,6 +751,8 @@ int main(int argc, char* argv[]) {
         r.overallEntropy = pe.GetOverallEntropy();
         r.sections = pe.GetSections();
         r.imports = pe.GetImports();
+
+        pe.DetectInstaller(r);
 
         CryptoVerifier::ComputeHashes(pe.GetBaseAddress(), pe.GetFileSize(), r.imports, r);
         CryptoVerifier::VerifyAuthenticode(wpath, pe.GetBaseAddress(), pe.GetFileSize(), r);
@@ -770,6 +826,7 @@ int main(int argc, char* argv[]) {
     TestSyscallStubVerification();
     TestPebDeepLdrWalkVsBenign();
     TestProcessInjectionCoLocationAndRwx();
+    TestInstallerFalsePositiveElimination();
 
     std::cout << "========================================================\n";
     std::cout << "  ALL TESTS PASSED WITH 100% SUCCESS!\n";

@@ -3,6 +3,7 @@ param(
     [switch]$Test,
     [string]$Scan,
     [switch]$Build,
+    [switch]$Native,
     [switch]$Help
 )
 
@@ -77,28 +78,33 @@ if ($Help) {
     exit 0
 }
 
-# 1. Handle Explicit Build Request
-if ($Build) {
-    $ok = Invoke-Build
-    if (-not $ok) { exit 1 }
-    exit 0
-}
-
-# 2. Ensure Binaries Exist
+# 1. Automatic Timestamp Check & Build Handling
+$needBuild = $Build
 if ((-not (Test-Path $ExePath)) -or (-not (Test-Path $TestsExePath))) {
-    Write-Host "[Koltzi] Binaries not found. Initiating initial build..." -ForegroundColor Yellow
-    $ok = Invoke-Build
-    if (-not $ok) { exit 1 }
+    $needBuild = $true
+} else {
+    $exeTime = (Get-Item $ExePath).LastWriteTime
+    $newer = Get-ChildItem -Path "src" -Recurse -File | Where-Object { $_.LastWriteTime -gt $exeTime }
+    if ($newer) {
+        Write-Host "[Koltzi] Source changes detected ($($newer.Count) files newer than binary). Recompiling..." -ForegroundColor Yellow
+        $needBuild = $true
+    }
 }
 
-# 3. Handle Automated Test Mode
+if ($needBuild) {
+    $ok = Invoke-Build
+    if (-not $ok) { exit 1 }
+    if ($Build) { exit 0 }
+}
+
+# 2. Handle Automated Test Mode
 if ($Test) {
     Write-Host "[Koltzi] Executing test suite via KoltziTests.exe..." -ForegroundColor Cyan
     & $TestsExePath
     exit $LASTEXITCODE
 }
 
-# 4. Handle CLI File Scan Mode
+# 3. Handle CLI File Scan Mode
 if ($Scan) {
     if (-not (Test-Path $Scan)) {
         Write-Error "File not found: $Scan"
@@ -110,6 +116,15 @@ if ($Scan) {
     exit $LASTEXITCODE
 }
 
-# 5. Default Action: Launch GUI Desktop Companion
-Write-Host "[Koltzi] Launching floating desktop companion..." -ForegroundColor Green
-Start-Process -FilePath $ExePath
+# 4. Default Action: Launch Modern Desktop Application (or -Native for Direct2D)
+if ($Native) {
+    Write-Host "[Koltzi] Launching native Direct2D executable..." -ForegroundColor Green
+    Start-Process -FilePath $ExePath -WorkingDirectory $PSScriptRoot
+    exit 0
+}
+
+Write-Host "[Koltzi] Launching modern desktop frontend with Ghost companion..." -ForegroundColor Green
+Start-Process -FilePath "cmd.exe" -ArgumentList "/c npx electron ." -WorkingDirectory $ScriptDir
+exit 0
+
+

@@ -31,3 +31,8 @@ Makefile
 *.ninja
 .ninja_*
 compile_commands.json
+
+# Node & package artifacts
+node_modules/
+dist/
+

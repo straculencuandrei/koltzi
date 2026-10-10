@@ -77,7 +77,7 @@ HRESULT GhostRenderer::Initialize(ID2D1RenderTarget* rt, IDWriteFactory* dwriteF
     // Text Format for question mark and symbols
     if (m_dwriteFactory) {
         m_dwriteFactory->CreateTextFormat(
-            L"Segoe UI",
+            L"JetBrains Mono",
             nullptr,
             DWRITE_FONT_WEIGHT_BOLD,
             DWRITE_FONT_STYLE_NORMAL,
@@ -152,12 +152,11 @@ void GhostRenderer::Update(float dt, GhostMood mood) {
         if (m_anim.scanLineY > 110.0f) m_anim.scanLineY = -30.0f;
     }
 
-    // Panic jitter for Alarmed state
+    // Smooth organic shivering for Alarmed state using harmonic continuous equations
     if (m_anim.currentMood == GhostMood::Alarmed) {
-        static std::mt19937 rng(1337);
-        std::uniform_real_distribution<float> dist(-1.8f, 1.8f);
-        m_anim.jitterX = dist(rng);
-        m_anim.jitterY = dist(rng);
+        float t = m_anim.timeSeconds;
+        m_anim.jitterX = std::sin(t * 42.0f) * 1.4f + std::sin(t * 71.0f) * 0.7f;
+        m_anim.jitterY = std::cos(t * 36.0f) * 1.2f + std::sin(t * 63.0f) * 0.6f;
 
         // Dripping sweat
         m_anim.sweatY += dt * 45.0f;
@@ -267,7 +266,7 @@ void GhostRenderer::Render(ID2D1RenderTarget* rt, float centerX, float centerY) 
 
     // Restore transform for particles
     rt->SetTransform(origTransform);
-    RenderParticles(rt);
+    RenderParticles(rt, centerX, centerY);
 }
 
 void GhostRenderer::RenderAura(ID2D1RenderTarget* rt, float cx, float cy, D2D1_COLOR_F auraColor) {
@@ -338,7 +337,7 @@ void GhostRenderer::RenderBody(ID2D1RenderTarget* rt, float cx, float cy) {
         D2D1::Point2F(leftX, skirtY)
     ));
 
-    // Animated bottom wavy skirt (3 Bézier wave scallops)
+    // Animated bottom wavy skirt (3 Bezier wave scallops)
     float wavePhase = m_anim.timeSeconds * 5.0f;
     float waveAmp = (m_anim.currentMood == GhostMood::Alarmed) ? 6.5f : 4.5f;
 
@@ -577,21 +576,17 @@ void GhostRenderer::RenderSpecialEffects(ID2D1RenderTarget* rt, float cx, float 
     }
 }
 
-void GhostRenderer::RenderParticles(ID2D1RenderTarget* rt) {
-    if (!rt) return;
+void GhostRenderer::RenderParticles(ID2D1RenderTarget* rt, float cx, float cy) {
+    if (!rt || !m_glowBrush) return;
 
     for (const auto& p : m_anim.motes) {
-        ID2D1SolidColorBrush* pBrush = nullptr;
         D2D1_COLOR_F c = p.color;
         c.a = p.alpha;
-        rt->CreateSolidColorBrush(c, &pBrush);
-        if (pBrush) {
-            rt->FillEllipse(
-                D2D1::Ellipse(D2D1::Point2F(p.x + 110.0f, p.y + 160.0f), p.size, p.size),
-                pBrush
-            );
-            SafeRelease(pBrush);
-        }
+        m_glowBrush->SetColor(c);
+        rt->FillEllipse(
+            D2D1::Ellipse(D2D1::Point2F(cx + p.x, cy + p.y), p.size, p.size),
+            m_glowBrush
+        );
     }
 }
 

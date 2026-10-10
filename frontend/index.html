@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Koltzi — Malware Triage Workbench &amp; Ghost Companion</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Animated Ambient Radiant Blobs Layer -->
+    <div class="ambient-blobs-layer">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+        <div class="blob blob-3"></div>
+    </div>
+
+    <!-- Application Shell -->
+    <div class="app-container">
+        <!-- Custom Titlebar -->
+        <header class="titlebar">
+            <div class="titlebar-left">
+                <div class="brand-icon"></div>
+                <span class="brand-name">Koltzi</span>
+                <span class="tag-pill">v2.0</span>
+                <span style="color: var(--text-dim);">/</span>
+                <span class="tag-pill" id="target-arch-pill">Native PE</span>
+            </div>
+            <div class="titlebar-center">
+                <span style="color: var(--text-dim);">Target:</span>
+                <span class="active-file-indicator" id="active-target-title">No binary target loaded</span>
+            </div>
+            <div class="titlebar-controls">
+                <button class="window-btn" id="btn-win-min" title="Minimize">
+                    <svg width="10" height="10" viewBox="0 0 10 10"><rect y="4.5" width="10" height="1" fill="currentColor"/></svg>
+                </button>
+                <button class="window-btn" id="btn-win-max" title="Maximize">
+                    <svg width="10" height="10" viewBox="0 0 10 10"><rect x="1" y="1" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1"/></svg>
+                </button>
+                <button class="window-btn btn-close" id="btn-win-close" title="Close">
+                    <svg width="10" height="10" viewBox="0 0 10 10"><line x1="1" y1="1" x2="9" y2="9" stroke="currentColor" stroke-width="1.2"/><line x1="9" y1="1" x2="1" y2="9" stroke="currentColor" stroke-width="1.2"/></svg>
+                </button>
+            </div>
+        </header>
+
+        <!-- Navigation Toolbar -->
+        <nav class="nav-toolbar">
+            <div style="display: flex; align-items: center;">
+                <div class="preset-pill-group">
+                    <span class="preset-label">Profiles</span>
+                    <button class="btn-glass-pill" data-sample="clean">Clean</button>
+                    <button class="btn-glass-pill" data-sample="packed">Packed</button>
+                    <button class="btn-glass-pill" data-sample="syscall">Syscalls</button>
+                    <button class="btn-glass-pill" data-sample="stealer">Stealer</button>
+                    <button class="btn-glass-pill" data-sample="injection">Injection</button>
+                </div>
+                <div class="theme-pill-group">
+                    <span class="preset-label">Theme</span>
+                    <button class="btn-theme-pill active" data-theme-btn="ember" title="Warm Amber and Charcoal">
+                        <span class="theme-dot" style="background: #f59e0b;"></span> Ember
+                    </button>
+                    <button class="btn-theme-pill" data-theme-btn="midnight" title="Midnight Slate and Petrol Navy">
+                        <span class="theme-dot" style="background: #38bdf8;"></span> Midnight
+                    </button>
+                    <button class="btn-theme-pill" data-theme-btn="twilight" title="Twilight Violet and Royal Velvet">
+                        <span class="theme-dot" style="background: #a78bfa;"></span> Twilight
+                    </button>
+                </div>
+            </div>
+            <div>
+                <button class="btn-solid-primary" id="btn-open-binary">+ Open Binary</button>
+            </div>
+        </nav>
+
+        <!-- Main Viewport -->
+        <main class="main-viewport">
+            <!-- Left Stage: Ghost Companion & Executive Verdict -->
+            <section class="executive-stage">
+                <!-- Living Ghost Card -->
+                <div class="ghost-companion-card">
+                    <div class="ghost-canvas-container">
+                        <canvas id="ghost-canvas"></canvas>
+                    </div>
+                    <div class="ghost-speech-bubble" id="ghost-bubble">
+                        Ready for binary analysis. Drop a PE binary target or pick a profile above.
+                    </div>
+                </div>
+
+                <!-- Verdict Hero Unit -->
+                <div class="verdict-hero-card">
+                    <div class="verdict-hero-row">
+                        <div class="score-display">
+                            <span class="score-number" id="threat-score-num">0</span>
+                            <span class="score-denom">/ 100</span>
+                        </div>
+                        <div class="verdict-badge pass" id="verdict-badge">Awaiting binary</div>
+                    </div>
+                    <div class="verdict-description" id="verdict-desc">
+                        Select a sample above or drop a PE executable to begin.
+                    </div>
+                </div>
+
+                <!-- Telemetry Summary -->
+                <div class="telemetry-summary-card">
+                    <div class="stat-row">
+                        <span class="stat-label">Digital signature</span>
+                        <span class="stat-value" id="stat-sig">Standby for PE file</span>
+                    </div>
+
+                    <div class="stat-row">
+                        <span class="stat-label">Shannon entropy</span>
+                        <span class="stat-value" id="stat-entropy">0.00 / 8.00 (Unloaded)</span>
+                        <div class="progress-track">
+                            <div class="progress-fill" id="entropy-progress-fill"></div>
+                        </div>
+                    </div>
+
+                    <div class="stat-row">
+                        <span class="stat-label">Architecture</span>
+                        <span class="stat-value" id="stat-arch">Unloaded</span>
+                    </div>
+
+                    <div class="stat-row">
+                        <span class="stat-label">Imports</span>
+                        <span class="stat-value" id="stat-imports">0 dependencies</span>
+                    </div>
+
+                    <div class="stat-row">
+                        <span class="stat-label">Triage latency</span>
+                        <span class="stat-value" id="stat-latency" style="color: var(--status-pass);">Ready</span>
+                    </div>
+                </div>
+
+                <!-- Drop Zone Target -->
+                <div class="drop-zone-card" id="drop-zone">
+                    <svg class="drop-icon-svg" viewBox="0 0 24 24">
+                        <path d="M12 4v12M7 9l5-5 5 5M4 18h16" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    <span class="drop-text">Drop PE binary target</span>
+                    <span class="drop-subtext">Accepts .exe, .dll, and .sys files. Click to browse.</span>
+                </div>
+            </section>
+
+            <!-- Right Stage: Interactive Workbench -->
+            <section class="workbench-panel">
+                <div class="workbench-tab-bar">
+                    <div class="tab-pill-list">
+                        <button class="tab-btn active" data-tab="overview">Overview</button>
+                        <button class="tab-btn" data-tab="sections">Sections and headers</button>
+                        <button class="tab-btn" data-tab="telemetry" id="tab-telemetry-btn">Telemetry log (0)</button>
+                    </div>
+                    <div id="quick-metrics-summary" style="font-size: 11px; color: var(--text-dim);">
+                        Direct2D/C++ Engine Offline Pass
+                    </div>
+                </div>
+
+                <div class="workbench-content">
+                    <!-- Tab 1: Overview -->
+                    <div class="tab-pane active" id="pane-overview">
+                        <div class="content-subcard">
+                            <div class="subcard-header">
+                                <span>Static heuristics and findings</span>
+                                <span id="findings-count-badge" class="tag-pill">0 items</span>
+                            </div>
+                            <div class="findings-list" id="findings-container">
+                                <div class="finding-row">
+                                    <span class="finding-pill info">INFO</span>
+                                    <span class="finding-text">Select a preset sample above or drop a PE executable to inspect static findings.</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="content-subcard">
+                            <div class="subcard-header">
+                                <span>Cryptographic hashes and identifiers</span>
+                                <span style="font-size: 10px; color: var(--text-dim);">Click tile to copy</span>
+                            </div>
+                            <div class="hashes-grid">
+                                <div class="hash-tile" data-hash="sha256">
+                                    <span class="hash-label">SHA-256</span>
+                                    <span class="hash-value" id="hash-sha256">Pending ingestion</span>
+                                </div>
+                                <div class="hash-tile" data-hash="imphash">
+                                    <span class="hash-label">IMPHASH</span>
+                                    <span class="hash-value" id="hash-imphash">Pending ingestion</span>
+                                </div>
+                                <div class="hash-tile" data-hash="md5">
+                                    <span class="hash-label">MD5</span>
+                                    <span class="hash-value" id="hash-md5">Pending ingestion</span>
+                                </div>
+                                <div class="hash-tile" data-hash="sha1">
+                                    <span class="hash-label">SHA-1</span>
+                                    <span class="hash-value" id="hash-sha1">Pending ingestion</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tab 2: Sections & Headers -->
+                    <div class="tab-pane" id="pane-sections">
+                        <div class="content-subcard">
+                            <div class="subcard-header">
+                                <span>Section memory layout and entropy density</span>
+                                <div style="display: flex; gap: 12px; font-size: 10px;">
+                                    <span style="color: var(--status-pass);">● Code (&lt;6.0)</span>
+                                    <span style="color: var(--accent-cyan);">● Data (6.0-7.2)</span>
+                                    <span style="color: var(--status-threat);">● Packed (&gt;7.2)</span>
+                                </div>
+                            </div>
+                            <div class="sections-heatmap-bar" id="sections-heatmap">
+                                <div class="section-slice" style="width: 100%; background: rgba(255,255,255,0.06);">No sections loaded</div>
+                            </div>
+                        </div>
+
+                        <div class="content-subcard">
+                            <div class="subcard-header">
+                                <span>PE section table</span>
+                            </div>
+                            <div class="data-table-container">
+                                <table class="glass-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Section</th>
+                                            <th>Virtual Addr</th>
+                                            <th>Virtual Size</th>
+                                            <th>Entropy</th>
+                                            <th>Permissions and Verdict</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="sections-table-body">
+                                        <tr>
+                                            <td colspan="5" style="color: var(--text-dim); text-align: center; padding: 24px;">No sections loaded. Standby for binary ingestion.</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tab 3: Telemetry Log -->
+                    <div class="tab-pane" id="pane-telemetry">
+                        <div class="content-subcard">
+                            <div class="subcard-header">
+                                <span>Telemetry audit trail</span>
+                                <div style="display: flex; gap: 6px;">
+                                    <button class="btn-glass-pill active log-filter-btn" data-filter="ALL" style="padding: 2px 8px; font-size: 10px;">All</button>
+                                    <button class="btn-glass-pill log-filter-btn" data-filter="HEADER" style="padding: 2px 8px; font-size: 10px;">Header</button>
+                                    <button class="btn-glass-pill log-filter-btn" data-filter="ZYDIS" style="padding: 2px 8px; font-size: 10px;">Zydis</button>
+                                    <button class="btn-glass-pill log-filter-btn" data-filter="HASH" style="padding: 2px 8px; font-size: 10px;">Hash</button>
+                                    <button class="btn-glass-pill log-filter-btn" data-filter="ASSESS" style="padding: 2px 8px; font-size: 10px;">Assess</button>
+                                </div>
+                            </div>
+                            <div class="data-table-container" style="max-height: 480px;">
+                                <table class="glass-table">
+                                    <thead>
+                                        <tr>
+                                            <th style="width: 90px;">Time</th>
+                                            <th style="width: 100px;">Subsystem</th>
+                                            <th style="width: 80px;">Status</th>
+                                            <th>Telemetry details</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="telemetry-table-body">
+                                        <tr>
+                                            <td colspan="4" style="color: var(--text-dim); text-align: center; padding: 24px;">Engine idle. Direct2D and Zydis engine standing by.</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Status Footer Rail -->
+        <footer class="status-footer">
+            <div class="footer-left">
+                <div class="status-dot"></div>
+                <span>Engine: Active triage | Native C++20 core | Air-gap isolated offline mode</span>
+            </div>
+            <div>
+                <span>Electron + Direct2D bridge | High-DPI hardware accelerated</span>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Scripts -->
+    <script src="ghost.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

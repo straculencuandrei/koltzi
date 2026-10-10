@@ -16,6 +16,7 @@ if (MSVC)
     add_compile_options(
         /permissive-
         /W4
+        /utf-8
         $<$<CONFIG:Release>:/O2>
         $<$<CONFIG:Release>:/Oi>
         $<$<CONFIG:Release>:/GL>

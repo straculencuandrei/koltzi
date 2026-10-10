@@ -21,14 +21,15 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
 
     if (argc >= 2) {
-        if (AttachConsole(ATTACH_PARENT_PROCESS)) {
-            FILE* fpOut = nullptr;
-            FILE* fpErr = nullptr;
-            freopen_s(&fpOut, "CONOUT$", "w", stdout);
-            freopen_s(&fpErr, "CONOUT$", "w", stderr);
-            std::ios::sync_with_stdio(true);
-            std::cout.clear();
-            std::cerr.clear();
+        HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+        if (!hOut || hOut == INVALID_HANDLE_VALUE) {
+            if (AttachConsole(ATTACH_PARENT_PROCESS)) {
+                FILE* fpOut = nullptr;
+                FILE* fpErr = nullptr;
+                freopen_s(&fpOut, "CONOUT$", "w", stdout);
+                freopen_s(&fpErr, "CONOUT$", "w", stderr);
+                std::ios::sync_with_stdio(true);
+            }
         }
     }
 

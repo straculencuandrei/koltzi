@@ -26,7 +26,7 @@ private:
     void RenderFace(ID2D1RenderTarget* rt, float cx, float cy);
     void RenderArms(ID2D1RenderTarget* rt, float cx, float cy);
     void RenderSpecialEffects(ID2D1RenderTarget* rt, float cx, float cy);
-    void RenderParticles(ID2D1RenderTarget* rt);
+    void RenderParticles(ID2D1RenderTarget* rt, float cx, float cy);
 
     void UpdateParticles(float dt);
 
