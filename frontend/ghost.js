@@ -57,16 +57,16 @@ class GhostCompanion {
 
     initParticles() {
         this.particles = [];
-        for (let i = 0; i < 28; i++) {
+        for (let i = 0; i < 22; i++) {
             this.particles.push({
-                x: (Math.random() - 0.5) * 160,
-                y: (Math.random() - 0.5) * 160,
-                vx: (Math.random() - 0.5) * 0.4,
-                vy: -Math.random() * 0.6 - 0.2,
-                size: Math.random() * 2.5 + 1.2,
-                alpha: Math.random() * 0.7 + 0.2,
+                x: (Math.random() - 0.5) * 140,
+                y: (Math.random() - 0.5) * 120,
+                vx: (Math.random() - 0.5) * 0.35,
+                vy: -Math.random() * 0.45 - 0.15,
+                size: Math.random() * 2.2 + 1.0,
+                alpha: Math.random() * 0.6 + 0.2,
                 life: Math.random() * 100,
-                maxLife: 100 + Math.random() * 80
+                maxLife: 100 + Math.random() * 70
             });
         }
     }
@@ -80,7 +80,7 @@ class GhostCompanion {
         this.width = rect.width;
         this.height = rect.height;
         this.x = this.width / 2;
-        this.baseY = this.height / 2 + 6;
+        this.baseY = this.height / 2 - 8;
     }
 
     setMood(mood) {
@@ -134,18 +134,18 @@ class GhostCompanion {
         this.setDialogue(picked, false);
 
         // Fun jiggle
-        this.floatOffset -= 12;
-        this.tilt = (Math.random() - 0.5) * 0.2;
+        this.floatOffset -= 8;
+        this.tilt = (Math.random() - 0.5) * 0.16;
     }
 
     update(dt) {
         this.time += dt;
 
         // Floating bobbing physics
-        const bobSpeed = (this.mood === 'alarmed') ? 4.2 : (this.mood === 'sniffing') ? 3.5 : 2.2;
-        const bobAmp = (this.mood === 'happy') ? 10 : 7;
+        const bobSpeed = (this.mood === 'alarmed') ? 3.8 : (this.mood === 'sniffing') ? 3.2 : 2.0;
+        const bobAmp = (this.mood === 'happy') ? 8 : 6;
         this.floatOffset = Math.sin(this.time * bobSpeed) * bobAmp;
-        this.tilt += (-Math.sin(this.time * (bobSpeed * 0.7)) * 0.04 - this.tilt) * Math.min(1, dt * 6);
+        this.tilt += (-Math.sin(this.time * (bobSpeed * 0.7)) * 0.035 - this.tilt) * Math.min(1, dt * 6);
 
         this.y = this.baseY + this.floatOffset;
 
@@ -177,11 +177,11 @@ class GhostCompanion {
             p.x += p.vx;
             p.y += p.vy;
             p.life += dt * 30;
-            if (p.life >= p.maxLife || p.y < -120) {
-                p.x = (Math.random() - 0.5) * 140;
-                p.y = 80 + Math.random() * 40;
+            if (p.life >= p.maxLife || p.y < -75) {
+                p.x = (Math.random() - 0.5) * 120;
+                p.y = 50 + Math.random() * 25;
                 p.life = 0;
-                p.alpha = Math.random() * 0.7 + 0.2;
+                p.alpha = Math.random() * 0.6 + 0.2;
             }
         }
 
@@ -227,27 +227,28 @@ class GhostCompanion {
     }
 
     renderAura(ctx) {
-        let auraColor = 'rgba(245, 158, 11, 0.28)'; // Default Ember
-        if (this.theme === 'midnight') auraColor = 'rgba(56, 189, 248, 0.32)';
-        else if (this.theme === 'twilight') auraColor = 'rgba(167, 139, 250, 0.32)';
+        let auraColor = 'rgba(245, 158, 11, 0.24)'; // Default Ember
+        if (this.theme === 'midnight') auraColor = 'rgba(56, 189, 248, 0.26)';
+        else if (this.theme === 'twilight') auraColor = 'rgba(167, 139, 250, 0.26)';
 
-        if (this.mood === 'happy') auraColor = 'rgba(16, 185, 129, 0.38)'; // Emerald
-        else if (this.mood === 'alarmed') auraColor = 'rgba(239, 68, 68, 0.42)'; // Crimson
+        if (this.mood === 'happy') auraColor = 'rgba(16, 185, 129, 0.30)'; // Emerald
+        else if (this.mood === 'alarmed') auraColor = 'rgba(239, 68, 68, 0.32)'; // Crimson
         else if (this.mood === 'puzzled') {
-            auraColor = (this.theme === 'twilight') ? 'rgba(192, 132, 252, 0.38)' : 'rgba(245, 158, 11, 0.35)';
+            auraColor = (this.theme === 'twilight') ? 'rgba(192, 132, 252, 0.30)' : 'rgba(245, 158, 11, 0.28)';
         } else if (this.mood === 'sniffing') {
-            auraColor = (this.theme === 'midnight') ? 'rgba(56, 189, 248, 0.36)' :
-                        (this.theme === 'twilight') ? 'rgba(192, 132, 252, 0.36)' : 'rgba(245, 158, 11, 0.32)';
+            auraColor = (this.theme === 'midnight') ? 'rgba(56, 189, 248, 0.28)' :
+                        (this.theme === 'twilight') ? 'rgba(192, 132, 252, 0.28)' : 'rgba(245, 158, 11, 0.26)';
         }
 
-        const rad = 85 + Math.sin(this.time * 3.5) * 5;
-        const grad = ctx.createRadialGradient(0, -10, 20, 0, -10, rad);
+        const rad = 70 + Math.sin(this.time * 3.0) * 4;
+        const grad = ctx.createRadialGradient(0, -6, 12, 0, -6, rad);
         grad.addColorStop(0, auraColor);
+        grad.addColorStop(0.65, auraColor.replace(/[\d\.]+\)$/, '0.08)'));
         grad.addColorStop(1, 'rgba(0,0,0,0)');
 
         ctx.fillStyle = grad;
         ctx.beginPath();
-        ctx.arc(0, -10, rad, 0, Math.PI * 2);
+        ctx.arc(0, -6, rad, 0, Math.PI * 2);
         ctx.fill();
     }
 
@@ -311,12 +312,13 @@ class GhostCompanion {
         ctx.closePath();
         ctx.fill();
 
-        // 1px Inner specular highlight rim along head
+        // Inner specular highlight rim hugging the inner dome curve
         ctx.shadowBlur = 0;
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.65)';
-        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.40)';
+        ctx.lineWidth = 1.4;
         ctx.beginPath();
-        ctx.arc(0, -18, 52, Math.PI * 1.15, Math.PI * 1.85);
+        ctx.moveTo(-36, 0);
+        ctx.bezierCurveTo(-36, -42, 36, -42, 36, 0);
         ctx.stroke();
 
         ctx.restore();
@@ -448,35 +450,36 @@ class GhostCompanion {
 
     renderMoodAccessories(ctx) {
         if (this.mood === 'puzzled') {
-            // Floating amber question mark above right side of head
+            // Floating amber question mark near crest of head
             ctx.save();
-            ctx.font = 'bold 22px "JetBrains Mono", monospace';
+            ctx.font = 'bold 20px "JetBrains Mono", monospace';
             ctx.fillStyle = '#f59e0b';
             ctx.shadowColor = 'rgba(245, 158, 11, 0.6)';
-            ctx.shadowBlur = 10;
-            const qY = -68 + Math.sin(this.time * 4) * 4;
-            ctx.fillText('?', 34, qY);
+            ctx.shadowBlur = 8;
+            const qY = -48 + Math.sin(this.time * 4) * 3;
+            ctx.fillText('?', 32, qY);
             ctx.restore();
         } else if (this.mood === 'alarmed') {
             // Soft crimson exclamation badge
             ctx.save();
-            ctx.font = 'bold 22px "JetBrains Mono", monospace';
+            ctx.font = 'bold 20px "JetBrains Mono", monospace';
             ctx.fillStyle = '#ef4444';
             ctx.shadowColor = 'rgba(239, 68, 68, 0.8)';
-            ctx.shadowBlur = 12;
-            const aY = -68 + Math.sin(this.time * 6) * 4;
-            ctx.fillText('!', 36, aY);
+            ctx.shadowBlur = 10;
+            const aY = -48 + Math.sin(this.time * 6) * 3;
+            ctx.fillText('!', 34, aY);
             ctx.restore();
         } else if (this.mood === 'sniffing') {
             // Small radar scanning wave ring
             ctx.save();
-            ctx.strokeStyle = 'rgba(245, 158, 11, 0.6)';
-            ctx.lineWidth = 1.5;
-            const rRadius = 16 + (this.time * 28) % 36;
-            const rAlpha = 1 - ((this.time * 28) % 36) / 36;
-            ctx.strokeStyle = `rgba(245, 158, 11, ${rAlpha})`;
+            const rRadius = 10 + (this.time * 24) % 24;
+            const rAlpha = 1 - ((this.time * 24) % 24) / 24;
+            ctx.strokeStyle = (this.theme === 'midnight') ? `rgba(56, 189, 248, ${rAlpha * 0.7})` :
+                              (this.theme === 'twilight') ? `rgba(167, 139, 250, ${rAlpha * 0.7})` :
+                              `rgba(245, 158, 11, ${rAlpha * 0.7})`;
+            ctx.lineWidth = 1.2;
             ctx.beginPath();
-            ctx.arc(0, -75, rRadius, 0, Math.PI * 2);
+            ctx.arc(0, -52, rRadius, 0, Math.PI * 2);
             ctx.stroke();
             ctx.restore();
         } else if (this.mood === 'happy') {
@@ -485,8 +488,8 @@ class GhostCompanion {
             ctx.fillStyle = '#34d399';
             ctx.shadowColor = 'rgba(52, 211, 153, 0.8)';
             ctx.shadowBlur = 8;
-            const starY = -65 + Math.sin(this.time * 3) * 5;
-            this.drawStar(ctx, 38, starY, 4, 6, 2.5);
+            const starY = -50 + Math.sin(this.time * 3) * 3.5;
+            this.drawStar(ctx, 36, starY, 4, 5.5, 2.2);
             ctx.restore();
         }
     }
