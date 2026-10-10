@@ -545,44 +545,59 @@ document.addEventListener('DOMContentLoaded', () => {
         // Phase 1: Ingestion & Architecture
         const archStr = `${report.machineType || 'AMD64'} (${report.is64Bit ? '64-bit' : '32-bit'}) Windows PE`;
         let sigDesc = 'Unsigned binary without Authenticode digital signature. Bypasses enterprise code signing controls.';
+        let sigStatus = 'Unsigned';
+        let sigStatusClass = 'warn';
         if (report.signature && report.signature.isValid) {
             sigDesc = `Cryptographically signed and verified by ${report.signature.signerSubject || 'trusted vendor'} (${report.signature.digestAlgorithm || 'SHA-256'}). Authenticode chain is valid.`;
+            sigStatus = 'Signed (Valid)';
+            sigStatusClass = 'pass';
         } else if (report.signature && report.signature.isSigned) {
             sigDesc = 'Binary contains a digital certificate, but the signature is invalid or self-signed.';
+            sigStatus = 'Signature Invalid';
+            sigStatusClass = 'threat';
         }
+        const phase1Title = 'PE Architecture & Digital Identity Verification';
         const phase1Desc = `Target executable ${escapeHtml(report.fileName || 'binary')} compiled for ${archStr}, targeting the ${report.subsystem || 'Windows GUI'} subsystem. ${sigDesc}`;
         const phase1Tags = `
-            <span class="phase-proof-tag">${archStr}</span>
-            <span class="phase-proof-tag">${(report.signature && report.signature.isValid) ? 'Signed: Valid' : 'Unsigned'}</span>
+            <span class="phase-proof-tag info">${archStr}</span>
+            <span class="phase-proof-tag ${sigStatusClass}">${sigStatus}</span>
             <span class="phase-proof-tag">Entry RVA: 0x${(report.entryPointRva || 0x1000).toString(16).toUpperCase()}</span>
         `;
 
         // Phase 2: Container & Stager Extraction
-        let phase2Title = 'Phase 2 • Container Mechanics & Payload Staging';
+        let phase2Title = 'Container Mechanics & Payload Staging';
         let phase2Desc = 'Direct PE image mapping. Section layout adheres to standard uncompressed compilation standards with normal code density.';
-        let phase2Tags = '<span class="phase-proof-tag">Clean PE Image</span><span class="phase-proof-tag">Direct Memory Mapping</span>';
+        let phase2Tags = '<span class="phase-proof-tag pass">Clean PE Image</span><span class="phase-proof-tag">Direct Memory Mapping</span>';
+        let phase2Status = 'Benign Mapping';
+        let phase2StatusClass = 'pass';
 
         if (hasOverlay) {
             const ovMb = (report.overlaySize / (1024 * 1024)).toFixed(1);
             const ovPct = ((report.overlayRatio || 0) * 100).toFixed(1);
             const ovEnt = (report.overlayEntropy || 0).toFixed(2);
-            phase2Title = 'Phase 2 • Stager Extraction & Overlay Payload Unpacking';
+            phase2Title = 'Stager Extraction & Overlay Payload Unpacking';
             phase2Desc = `An appended binary container of ${ovMb} MB (${ovPct}% of entire file) is appended after the final PE section at offset 0x${(report.overlayOffset || 0).toString(16).toUpperCase()}. High Shannon entropy (${ovEnt}/8.00) confirms compressed or encrypted content. Upon launch, the outer carrier unpacks the inner payload files into %APPDATA% or %TEMP% before invoking child process execution.`;
             phase2Tags = `
-                <span class="phase-proof-tag">Overlay: ${ovMb} MB (${ovPct}%)</span>
-                <span class="phase-proof-tag">Offset: 0x${(report.overlayOffset || 0).toString(16).toUpperCase()}</span>
-                <span class="phase-proof-tag">Entropy: ${ovEnt}/8.00</span>
+                <span class="phase-proof-tag threat">Overlay: ${ovMb} MB (${ovPct}%)</span>
+                <span class="phase-proof-tag info">Offset: 0x${(report.overlayOffset || 0).toString(16).toUpperCase()}</span>
+                <span class="phase-proof-tag ${ovEnt > 7.2 ? 'threat' : 'warn'}">Entropy: ${ovEnt}/8.00</span>
             `;
+            phase2Status = 'Overlay Carrier';
+            phase2StatusClass = 'threat';
         } else if (report.overallEntropy > 7.0) {
-            phase2Title = 'Phase 2 • In-Memory Decompression & Runtime Unpacking';
+            phase2Title = 'In-Memory Decompression & Runtime Unpacking';
             phase2Desc = `Binary exhibits elevated Shannon entropy (${(report.overallEntropy || 0).toFixed(2)}/8.00). Executable instructions are compressed or encrypted on disk and decompressed dynamically into virtual memory during runtime startup.`;
-            phase2Tags = `<span class="phase-proof-tag">Entropy: ${(report.overallEntropy || 0).toFixed(2)}/8.00</span><span class="phase-proof-tag">Packed Code</span>`;
+            phase2Tags = `<span class="phase-proof-tag warn">Entropy: ${(report.overallEntropy || 0).toFixed(2)}/8.00</span><span class="phase-proof-tag warn">Packed Code</span>`;
+            phase2Status = 'Packed Code';
+            phase2StatusClass = 'warn';
         }
 
         // Phase 3: Defense Evasion & Hook Bypass
-        let phase3Title = 'Phase 3 • Defense Evasion & Kernel Hook Bypass';
+        let phase3Title = 'Defense Evasion & Kernel Hook Bypass';
         let phase3Desc = 'Standard API resolution. The binary resolves functions via the standard Windows Loader and Import Address Table (IAT) without unhooking or evasive instruction patterns.';
-        let phase3Tags = '<span class="phase-proof-tag">Standard IAT</span><span class="phase-proof-tag">Zero Anti-Analysis</span>';
+        let phase3Tags = '<span class="phase-proof-tag pass">Standard IAT</span><span class="phase-proof-tag pass">Zero Anti-Analysis</span>';
+        let phase3Status = 'Standard Loader';
+        let phase3StatusClass = 'pass';
 
         if (hasSyscalls || hasPeb || hasApiHash) {
             const scCount = (report.syscalls || []).length;
@@ -592,16 +607,20 @@ document.addEventListener('DOMContentLoaded', () => {
             const scList = (report.syscalls || []).map(s => `SSN 0x${s.ssn ? s.ssn.toString(16).toUpperCase() : '18'}`).slice(0, 3).join(', ');
             phase3Desc = `Directly bypasses endpoint security (EDR/AV) user-mode inline hooks by issuing direct kernel system calls ('syscall' instruction 0F 05) using System Service Numbers (${scList || '0x18'}). In addition, it traverses the Process Environment Block via gs:[0x60] and resolves Windows API exports dynamically using ROR13 API hashing, hiding API calls from static and dynamic IAT monitoring.`;
             phase3Tags = `
-                ${scCount > 0 ? `<span class="phase-proof-tag">Direct Syscalls (${scCount} stubs)</span>` : ''}
-                ${pebCount > 0 ? `<span class="phase-proof-tag">PEB Traversal (gs:[0x60])</span>` : ''}
-                ${hashCount > 0 ? `<span class="phase-proof-tag">ROR13 API Hashing (${hashCount} loops)</span>` : ''}
+                ${scCount > 0 ? `<span class="phase-proof-tag threat">Direct Syscalls (${scCount} stubs)</span>` : ''}
+                ${pebCount > 0 ? `<span class="phase-proof-tag threat">PEB Traversal (gs:[0x60])</span>` : ''}
+                ${hashCount > 0 ? `<span class="phase-proof-tag warn">ROR13 API Hashing (${hashCount} loops)</span>` : ''}
             `;
+            phase3Status = 'EDR Hook Bypass';
+            phase3StatusClass = 'threat';
         }
 
         // Phase 4: Operational Objective & Target Actions
-        let phase4Title = 'Phase 4 • Core Execution Objective & Local Payload Operations';
+        let phase4Title = 'Core Execution Objective & Local Payload Operations';
         let phase4Desc = 'Executes legitimate application logic without cross-process memory manipulation or credential database access.';
-        let phase4Tags = '<span class="phase-proof-tag">Benign Win32 Operations</span>';
+        let phase4Tags = '<span class="phase-proof-tag pass">Benign Win32 Operations</span>';
+        let phase4Status = 'Benign Execution';
+        let phase4StatusClass = 'pass';
 
         if (isMalicious || credTargets.length > 0 || hasInjection) {
             const ops = [];
@@ -609,95 +628,148 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (hasInjection) {
                 ops.push(`Performs cross-process memory tampering: allocates memory with PAGE_EXECUTE_READWRITE permissions via VirtualAllocEx, writes shellcode via WriteProcessMemory, and invokes thread execution via CreateRemoteThread.`);
-                tags.push('<span class="phase-proof-tag">Cross-Process Injection (RWX)</span>');
+                tags.push('<span class="phase-proof-tag threat">Cross-Process Injection (RWX)</span>');
             }
 
             if (credTargets.length > 0) {
                 const chromePaths = credTargets.map(c => c.matchedPattern).slice(0, 2).join(' | ');
                 ops.push(`Queries and extracts Google Chrome and Microsoft Edge Chromium user profiles, opening 'Login Data' SQLite databases to decrypt DPAPI-protected passwords and session cookies (${chromePaths}).`);
-                tags.push('<span class="phase-proof-tag">Chromium DPAPI Master Keys</span>');
+                tags.push('<span class="phase-proof-tag threat">Chromium DPAPI Master Keys</span>');
             }
 
             if (discordTargets.length > 0) {
                 ops.push(`Scrapes Discord client authentication tokens by scanning 'Local Storage/leveldb' database files in user application data.`);
-                tags.push('<span class="phase-proof-tag">Discord Auth Tokens</span>');
+                tags.push('<span class="phase-proof-tag threat">Discord Auth Tokens</span>');
             }
 
             if (walletTargets.length > 0) {
                 ops.push(`Enumerates browser extension directories to target cryptocurrency wallet vaults, including MetaMask (nkbihfbeogaeaoehlefnkodbefgpgknn) and multi-chain wallets.`);
-                tags.push('<span class="phase-proof-tag">Crypto Wallet Extensions</span>');
+                tags.push('<span class="phase-proof-tag threat">Crypto Wallet Extensions</span>');
             }
 
-            phase4Title = 'Phase 4 • Credential Scraping, Wallet Extraction & Injection';
+            phase4Title = 'Credential Scraping, Wallet Extraction & Injection';
             phase4Desc = ops.join(' ');
             phase4Tags = tags.join('');
+            phase4Status = 'Target Scraping';
+            phase4StatusClass = 'threat';
         }
 
         // Phase 5: Exfiltration & Network Delivery
-        let phase5Title = 'Phase 5 • Exfiltration & Command and Control Delivery';
+        let phase5Title = 'Exfiltration & Command and Control Delivery';
         let phase5Desc = 'Zero outbound network connections, remote webhooks, or exfiltration channels detected in static disassembly.';
-        let phase5Tags = '<span class="phase-proof-tag">No Outbound Exfiltration</span>';
+        let phase5Tags = '<span class="phase-proof-tag pass">No Outbound Exfiltration</span>';
+        let phase5Status = 'Local System';
+        let phase5StatusClass = 'pass';
 
         if (exfilTargets.length > 0) {
             const exfilUrls = exfilTargets.map(e => e.matchedPattern).slice(0, 2).join(', ');
-            phase5Title = 'Phase 5 • Outbound C2 Exfiltration & Webhook Transmission';
+            phase5Title = 'Outbound C2 Exfiltration & Webhook Transmission';
             phase5Desc = `Packages the collected credential archives, session tokens, and system reconnaissance payloads, and exfiltrates them over HTTPS to attacker-controlled command and control endpoints: ${escapeHtml(exfilUrls)}. Using legitimate Discord webhooks or Telegram bot APIs conceals the malicious data transfer within normal developer network traffic to evade firewall and DLP inspection.`;
             phase5Tags = `
-                <span class="phase-proof-tag">HTTPS Exfiltration</span>
-                <span class="phase-proof-tag">${escapeHtml(exfilUrls)}</span>
+                <span class="phase-proof-tag threat">HTTPS Exfiltration</span>
+                <span class="phase-proof-tag threat">${escapeHtml(exfilUrls)}</span>
             `;
+            phase5Status = 'Exfiltration Active';
+            phase5StatusClass = 'threat';
         }
 
         // Render narrative card
         bodyEl.innerHTML = `
             <div class="behavioral-narrative-card">
-                <div class="behavioral-headline">
-                    <span class="behavioral-headline-badge ${badgeClass}">${badgeText}</span>
+                <div class="behavioral-headline-banner ${badgeClass}">
+                    <div class="behavioral-headline-top">
+                        <span class="behavioral-headline-badge ${badgeClass}">${badgeText}</span>
+                        <span class="behavioral-file-context">${escapeHtml(report.fileName || 'Target Executable')}</span>
+                    </div>
                     <div class="behavioral-headline-title">${escapeHtml(headlineTitle)}</div>
-                    <div class="behavioral-headline-sub">${escapeHtml(headlineSub)}</div>
+                    <div class="behavioral-headline-desc">${escapeHtml(headlineSub)}</div>
                 </div>
 
-                <div class="behavioral-phase-list">
-                    <div class="behavioral-phase-item">
-                        <div class="phase-step-badge">Phase 1</div>
-                        <div class="phase-step-content">
-                            <div class="phase-step-title">PE Architecture & Digital Identity Verification</div>
+                <div class="phase-timeline-pipeline">
+                    <div class="phase-timeline-step">
+                        <div class="phase-step-rail">
+                            <div class="phase-step-node ${sigStatusClass}">01</div>
+                            <div class="phase-step-line"></div>
+                        </div>
+                        <div class="phase-step-card">
+                            <div class="phase-step-header">
+                                <div class="phase-step-title-wrap">
+                                    <span class="phase-step-pill">PHASE 01</span>
+                                    <div class="phase-step-title">${escapeHtml(phase1Title)}</div>
+                                </div>
+                                <span class="phase-status-badge ${sigStatusClass}">${escapeHtml(sigStatus)}</span>
+                            </div>
                             <div class="phase-step-desc">${phase1Desc}</div>
                             <div class="phase-proof-tags-row">${phase1Tags}</div>
                         </div>
                     </div>
 
-                    <div class="behavioral-phase-item">
-                        <div class="phase-step-badge">Phase 2</div>
-                        <div class="phase-step-content">
-                            <div class="phase-step-title">${escapeHtml(phase2Title)}</div>
+                    <div class="phase-timeline-step">
+                        <div class="phase-step-rail">
+                            <div class="phase-step-node ${phase2StatusClass}">02</div>
+                            <div class="phase-step-line"></div>
+                        </div>
+                        <div class="phase-step-card">
+                            <div class="phase-step-header">
+                                <div class="phase-step-title-wrap">
+                                    <span class="phase-step-pill">PHASE 02</span>
+                                    <div class="phase-step-title">${escapeHtml(phase2Title)}</div>
+                                </div>
+                                <span class="phase-status-badge ${phase2StatusClass}">${escapeHtml(phase2Status)}</span>
+                            </div>
                             <div class="phase-step-desc">${phase2Desc}</div>
                             <div class="phase-proof-tags-row">${phase2Tags}</div>
                         </div>
                     </div>
 
-                    <div class="behavioral-phase-item">
-                        <div class="phase-step-badge">Phase 3</div>
-                        <div class="phase-step-content">
-                            <div class="phase-step-title">${escapeHtml(phase3Title)}</div>
+                    <div class="phase-timeline-step">
+                        <div class="phase-step-rail">
+                            <div class="phase-step-node ${phase3StatusClass}">03</div>
+                            <div class="phase-step-line"></div>
+                        </div>
+                        <div class="phase-step-card">
+                            <div class="phase-step-header">
+                                <div class="phase-step-title-wrap">
+                                    <span class="phase-step-pill">PHASE 03</span>
+                                    <div class="phase-step-title">${escapeHtml(phase3Title)}</div>
+                                </div>
+                                <span class="phase-status-badge ${phase3StatusClass}">${escapeHtml(phase3Status)}</span>
+                            </div>
                             <div class="phase-step-desc">${phase3Desc}</div>
                             <div class="phase-proof-tags-row">${phase3Tags}</div>
                         </div>
                     </div>
 
-                    <div class="behavioral-phase-item">
-                        <div class="phase-step-badge">Phase 4</div>
-                        <div class="phase-step-content">
-                            <div class="phase-step-title">${escapeHtml(phase4Title)}</div>
+                    <div class="phase-timeline-step">
+                        <div class="phase-step-rail">
+                            <div class="phase-step-node ${phase4StatusClass}">04</div>
+                            <div class="phase-step-line"></div>
+                        </div>
+                        <div class="phase-step-card">
+                            <div class="phase-step-header">
+                                <div class="phase-step-title-wrap">
+                                    <span class="phase-step-pill">PHASE 04</span>
+                                    <div class="phase-step-title">${escapeHtml(phase4Title)}</div>
+                                </div>
+                                <span class="phase-status-badge ${phase4StatusClass}">${escapeHtml(phase4Status)}</span>
+                            </div>
                             <div class="phase-step-desc">${phase4Desc}</div>
                             <div class="phase-proof-tags-row">${phase4Tags}</div>
                         </div>
                     </div>
 
-                    <div class="behavioral-phase-item">
-                        <div class="phase-step-badge">Phase 5</div>
-                        <div class="phase-step-content">
-                            <div class="phase-step-title">${escapeHtml(phase5Title)}</div>
+                    <div class="phase-timeline-step">
+                        <div class="phase-step-rail">
+                            <div class="phase-step-node ${phase5StatusClass}">05</div>
+                        </div>
+                        <div class="phase-step-card">
+                            <div class="phase-step-header">
+                                <div class="phase-step-title-wrap">
+                                    <span class="phase-step-pill">PHASE 05</span>
+                                    <div class="phase-step-title">${escapeHtml(phase5Title)}</div>
+                                </div>
+                                <span class="phase-status-badge ${phase5StatusClass}">${escapeHtml(phase5Status)}</span>
+                            </div>
                             <div class="phase-step-desc">${phase5Desc}</div>
                             <div class="phase-proof-tags-row">${phase5Tags}</div>
                         </div>
@@ -705,21 +777,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
 
                 <div class="behavioral-footer-grid">
-                    <div class="behavioral-footer-card">
-                        <div class="behavioral-footer-label">Primary Tactic</div>
-                        <div class="behavioral-footer-value ${isMalicious ? 'threat' : 'pass'}">${escapeHtml(tactic)}</div>
+                    <div class="behavioral-stat-box">
+                        <div class="b-lbl">Primary Tactic</div>
+                        <div class="b-val ${isMalicious ? 'threat' : 'pass'}">${escapeHtml(tactic)}</div>
                     </div>
-                    <div class="behavioral-footer-card">
-                        <div class="behavioral-footer-label">Evasion Technique</div>
-                        <div class="behavioral-footer-value ${hasSyscalls ? 'threat' : isSuspicious ? 'warn' : 'pass'}">${escapeHtml(evasion)}</div>
+                    <div class="behavioral-stat-box">
+                        <div class="b-lbl">Evasion Technique</div>
+                        <div class="b-val ${hasSyscalls ? 'threat' : isSuspicious ? 'warn' : 'pass'}">${escapeHtml(evasion)}</div>
                     </div>
-                    <div class="behavioral-footer-card">
-                        <div class="behavioral-footer-label">Harvested Targets</div>
-                        <div class="behavioral-footer-value ${credTargets.length > 0 ? 'threat' : 'pass'}">${escapeHtml(targets)}</div>
+                    <div class="behavioral-stat-box">
+                        <div class="b-lbl">Harvested Targets</div>
+                        <div class="b-val ${credTargets.length > 0 ? 'threat' : 'pass'}">${escapeHtml(targets)}</div>
                     </div>
-                    <div class="behavioral-footer-card">
-                        <div class="behavioral-footer-label">C2 Transport Channel</div>
-                        <div class="behavioral-footer-value ${exfilTargets.length > 0 ? 'threat' : 'pass'}">${escapeHtml(exfil)}</div>
+                    <div class="behavioral-stat-box">
+                        <div class="b-lbl">C2 Channel</div>
+                        <div class="b-val ${exfilTargets.length > 0 ? 'threat' : 'pass'}">${escapeHtml(exfil)}</div>
                     </div>
                 </div>
             </div>

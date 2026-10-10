@@ -1101,45 +1101,131 @@ body.is-dragging-file .global-drop-card {
     background: rgba(255, 255, 255, 0.02);
     border: 1px solid var(--glass-border);
     border-radius: var(--radius-sm);
+    padding: 16px 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+/* Behavioral Headline Banner */
+.behavioral-headline-banner {
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-sm);
     padding: 14px 16px;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 8px;
+    position: relative;
+    overflow: hidden;
 }
 
-.behavioral-headline {
-    font-size: 13px;
-    font-weight: 700;
-    color: var(--text-primary);
+.behavioral-headline-banner::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 3.5px;
+    background: var(--accent-primary);
+}
+
+.behavioral-headline-banner.threat::before {
+    background: var(--status-threat);
+    box-shadow: 0 0 10px var(--status-threat);
+}
+
+.behavioral-headline-banner.warn::before {
+    background: var(--status-warn);
+}
+
+.behavioral-headline-banner.pass::before {
+    background: var(--status-pass);
+}
+
+.behavioral-headline-top {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 10px;
     flex-wrap: wrap;
 }
 
-.behavioral-headline .headline-tag {
+.behavioral-headline-badge {
+    display: inline-flex;
+    align-items: center;
+    font-family: var(--font-mono);
     font-size: 10px;
-    padding: 2px 8px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    padding: 3px 9px;
     border-radius: var(--radius-pill);
-    font-weight: 600;
+    text-transform: uppercase;
 }
 
-.behavioral-phase-list {
+.behavioral-headline-badge.threat {
+    background: rgba(239, 68, 68, 0.2);
+    border: 1px solid rgba(239, 68, 68, 0.45);
+    color: #f87171;
+}
+
+.behavioral-headline-badge.warn {
+    background: rgba(245, 158, 11, 0.2);
+    border: 1px solid rgba(245, 158, 11, 0.45);
+    color: #fbbf24;
+}
+
+.behavioral-headline-badge.pass {
+    background: rgba(16, 185, 129, 0.2);
+    border: 1px solid rgba(16, 185, 129, 0.45);
+    color: #34d399;
+}
+
+.behavioral-file-context {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-dim);
+}
+
+.behavioral-headline-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 2px 0 0 0;
+    letter-spacing: -0.2px;
+}
+
+.behavioral-headline-desc {
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    margin: 0;
+}
+
+/* Phase Timeline Pipeline */
+.phase-timeline-pipeline {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 0;
 }
 
-.behavioral-phase-item {
+.phase-timeline-step {
     display: flex;
-    gap: 12px;
-    align-items: flex-start;
+    gap: 14px;
+    align-items: stretch;
 }
 
-.phase-step-badge {
+.phase-step-rail {
+    width: 32px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
     flex-shrink: 0;
-    width: 22px;
-    height: 22px;
+}
+
+.phase-step-node {
+    width: 28px;
+    height: 28px;
     border-radius: 50%;
     background: var(--glass-fill);
     border: 1px solid var(--glass-border);
@@ -1147,59 +1233,246 @@ body.is-dragging-file .global-drop-card {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: 700;
-    margin-top: 1px;
+    font-family: var(--font-mono);
+    flex-shrink: 0;
+    transition: all 0.2s ease;
 }
 
-.phase-content {
+.phase-step-node.threat {
+    background: rgba(239, 68, 68, 0.15);
+    border-color: rgba(239, 68, 68, 0.5);
+    color: #f87171;
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.2);
+}
+
+.phase-step-node.warn {
+    background: rgba(245, 158, 11, 0.15);
+    border-color: rgba(245, 158, 11, 0.5);
+    color: #fbbf24;
+}
+
+.phase-step-node.pass {
+    background: rgba(16, 185, 129, 0.15);
+    border-color: rgba(16, 185, 129, 0.5);
+    color: #34d399;
+}
+
+.phase-step-node.info {
+    background: rgba(56, 189, 248, 0.15);
+    border-color: rgba(56, 189, 248, 0.5);
+    color: #38bdf8;
+}
+
+.phase-step-line {
+    width: 2px;
     flex: 1;
+    min-height: 20px;
+    background: rgba(255, 255, 255, 0.10);
+    margin-top: 4px;
+    margin-bottom: 4px;
+    border-radius: 1px;
+}
+
+.phase-step-card {
+    flex: 1;
+    min-width: 0;
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-sm);
+    padding: 12px 14px;
+    margin-bottom: 12px;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+.phase-step-card:hover {
+    background: rgba(255, 255, 255, 0.045);
+    border-color: rgba(255, 255, 255, 0.20);
+    transform: translateX(2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+.phase-step-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+}
+
+.phase-step-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     min-width: 0;
 }
 
-.phase-title {
-    font-size: 11.5px;
-    font-weight: 600;
+.phase-step-pill {
+    font-family: var(--font-mono);
+    font-size: 9.5px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.07);
+    color: var(--text-dim);
+    flex-shrink: 0;
+}
+
+.phase-step-title {
+    font-size: 13px;
+    font-weight: 700;
     color: var(--text-primary);
-    margin-bottom: 2px;
+    letter-spacing: -0.2px;
+    margin: 0;
 }
 
-.phase-description {
-    font-size: 11px;
+.phase-status-badge {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 4px;
+    flex-shrink: 0;
+}
+
+.phase-status-badge.threat {
+    background: rgba(239, 68, 68, 0.2);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    color: #f87171;
+}
+
+.phase-status-badge.warn {
+    background: rgba(245, 158, 11, 0.2);
+    border: 1px solid rgba(245, 158, 11, 0.4);
+    color: #fbbf24;
+}
+
+.phase-status-badge.pass {
+    background: rgba(16, 185, 129, 0.2);
+    border: 1px solid rgba(16, 185, 129, 0.4);
+    color: #34d399;
+}
+
+.phase-status-badge.info {
+    background: rgba(56, 189, 248, 0.2);
+    border: 1px solid rgba(56, 189, 248, 0.4);
+    color: #38bdf8;
+}
+
+.phase-step-desc {
+    font-size: 11.5px;
     color: var(--text-secondary);
-    line-height: 1.5;
+    line-height: 1.6;
+    margin-bottom: 10px;
 }
 
+/* Phase Proof Evidence Tags */
+.phase-proof-tags-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.phase-proof-tag {
+    display: inline-flex;
+    align-items: center;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 500;
+    padding: 2.5px 7px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--glass-border);
+    color: var(--text-secondary);
+    transition: all 0.15s ease;
+}
+
+.phase-proof-tag:hover {
+    border-color: rgba(255, 255, 255, 0.25);
+    color: var(--text-primary);
+}
+
+.phase-proof-tag.threat {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.35);
+    color: #fca5a5;
+}
+
+.phase-proof-tag.warn {
+    background: rgba(245, 158, 11, 0.12);
+    border-color: rgba(245, 158, 11, 0.35);
+    color: #fcd34d;
+}
+
+.phase-proof-tag.pass {
+    background: rgba(16, 185, 129, 0.12);
+    border-color: rgba(16, 185, 129, 0.35);
+    color: #6ee7b7;
+}
+
+.phase-proof-tag.info {
+    background: rgba(56, 189, 248, 0.12);
+    border-color: rgba(56, 189, 248, 0.35);
+    color: #7dd3fc;
+}
+
+/* Behavioral Footer Grid */
 .behavioral-footer-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
     gap: 10px;
     margin-top: 4px;
-    padding-top: 10px;
+    padding-top: 14px;
     border-top: 1px solid var(--glass-border);
 }
 
 .behavioral-stat-box {
-    background: rgba(255, 255, 255, 0.02);
+    background: rgba(255, 255, 255, 0.025);
     border: 1px solid var(--glass-border);
     border-radius: var(--radius-sm);
-    padding: 8px 10px;
+    padding: 10px 12px;
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 4px;
+    transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.behavioral-stat-box:hover {
+    border-color: rgba(255, 255, 255, 0.20);
+    transform: translateY(-1px);
 }
 
 .behavioral-stat-box .b-lbl {
-    font-size: 10px;
+    font-size: 9.5px;
     color: var(--text-dim);
     text-transform: uppercase;
-    font-weight: 600;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    letter-spacing: 0.5px;
 }
 
 .behavioral-stat-box .b-val {
-    font-size: 11.5px;
+    font-size: 12px;
     color: var(--text-primary);
     font-weight: 600;
+    word-break: break-word;
+}
+
+.behavioral-stat-box .b-val.threat {
+    color: var(--status-threat);
+}
+
+.behavioral-stat-box .b-val.warn {
+    color: var(--status-warn);
+}
+
+.behavioral-stat-box .b-val.pass {
+    color: var(--status-pass);
 }
 
 /* Sections Heatmap Bar */
@@ -2906,22 +3179,99 @@ body[data-theme="light"] .behavioral-narrative-card {
     box-shadow: 0 2px 8px rgba(15, 23, 42, 0.04);
 }
 
-body[data-theme="light"] .behavioral-headline {
+body[data-theme="light"] .behavioral-headline-banner {
+    background: #f8fafc;
+    border: 1px solid rgba(0, 0, 0, 0.10);
+}
+
+body[data-theme="light"] .behavioral-headline-title,
+body[data-theme="light"] .phase-step-title {
     color: #0f172a;
 }
 
-body[data-theme="light"] .phase-title {
+body[data-theme="light"] .behavioral-headline-desc,
+body[data-theme="light"] .phase-step-desc {
+    color: #475569;
+}
+
+body[data-theme="light"] .phase-step-node {
+    background: #f8fafc;
+    border-color: rgba(0, 0, 0, 0.14);
     color: #0f172a;
 }
 
-body[data-theme="light"] .phase-description {
+body[data-theme="light"] .phase-step-node.threat {
+    background: #fef2f2;
+    border-color: #fca5a5;
+    color: #b91c1c;
+}
+
+body[data-theme="light"] .phase-step-node.warn {
+    background: #fffbeb;
+    border-color: #fcd34d;
+    color: #b45309;
+}
+
+body[data-theme="light"] .phase-step-node.pass {
+    background: #ecfdf5;
+    border-color: #6ee7b7;
+    color: #047857;
+}
+
+body[data-theme="light"] .phase-step-node.info {
+    background: #f0f9ff;
+    border-color: #7dd3fc;
+    color: #0369a1;
+}
+
+body[data-theme="light"] .phase-step-line {
+    background: rgba(0, 0, 0, 0.12);
+}
+
+body[data-theme="light"] .phase-step-card {
+    background: #ffffff;
+    border: 1px solid rgba(0, 0, 0, 0.10);
+    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.04);
+}
+
+body[data-theme="light"] .phase-step-card:hover {
+    background: #f8fafc;
+    border-color: rgba(0, 0, 0, 0.22);
+}
+
+body[data-theme="light"] .phase-step-pill {
+    background: #f1f5f9;
+    color: #64748b;
+}
+
+body[data-theme="light"] .phase-proof-tag {
+    background: #f8fafc;
+    border-color: rgba(0, 0, 0, 0.12);
     color: #334155;
 }
 
-body[data-theme="light"] .phase-step-badge {
-    background: rgba(37, 99, 235, 0.10);
-    border: 1px solid rgba(37, 99, 235, 0.25);
-    color: #2563eb;
+body[data-theme="light"] .phase-proof-tag.threat {
+    background: #fef2f2;
+    border-color: #fca5a5;
+    color: #b91c1c;
+}
+
+body[data-theme="light"] .phase-proof-tag.warn {
+    background: #fffbeb;
+    border-color: #fcd34d;
+    color: #b45309;
+}
+
+body[data-theme="light"] .phase-proof-tag.pass {
+    background: #ecfdf5;
+    border-color: #6ee7b7;
+    color: #047857;
+}
+
+body[data-theme="light"] .phase-proof-tag.info {
+    background: #f0f9ff;
+    border-color: #7dd3fc;
+    color: #0369a1;
 }
 
 body[data-theme="light"] .behavioral-stat-box {
@@ -2949,9 +3299,19 @@ body[data-theme="black"] .chain-tier-step-pill {
 }
 
 body[data-theme="black"] .behavioral-narrative-card,
+body[data-theme="black"] .behavioral-headline-banner,
+body[data-theme="black"] .phase-step-card,
 body[data-theme="black"] .behavioral-stat-box {
     background: #000000;
     border: 1px solid rgba(255, 255, 255, 0.20);
+}
+
+body[data-theme="black"] .phase-step-node {
+    background: #000000;
+}
+
+body[data-theme="black"] .phase-step-line {
+    background: rgba(255, 255, 255, 0.18);
 }
 
 body[data-theme="black"] .section-card {
