@@ -147,6 +147,7 @@
                         <button class="tab-btn active" data-tab="overview">Overview</button>
                         <button class="tab-btn" data-tab="sections">Sections and headers</button>
                         <button class="tab-btn" data-tab="telemetry" id="tab-telemetry-btn">Telemetry log (0)</button>
+                        <button class="tab-btn" data-tab="decompile" id="tab-decompile-btn">Decompiler &amp; RE (0)</button>
                     </div>
                     <div id="quick-metrics-summary" style="font-size: 11px; color: var(--text-dim);">
                         Direct2D/C++ Engine Offline Pass
@@ -241,11 +242,14 @@
                         <div class="content-subcard">
                             <div class="subcard-header">
                                 <span>Telemetry audit trail</span>
-                                <div style="display: flex; gap: 6px;">
+                                <div style="display: flex; gap: 6px; flex-wrap: wrap;">
                                     <button class="btn-glass-pill active log-filter-btn" data-filter="ALL" style="padding: 2px 8px; font-size: 10px;">All</button>
-                                    <button class="btn-glass-pill log-filter-btn" data-filter="HEADER" style="padding: 2px 8px; font-size: 10px;">Header</button>
+                                    <button class="btn-glass-pill log-filter-btn" data-filter="PATH" style="padding: 2px 8px; font-size: 10px;">Paths</button>
+                                    <button class="btn-glass-pill log-filter-btn" data-filter="FLOW" style="padding: 2px 8px; font-size: 10px;">Control flow</button>
+                                    <button class="btn-glass-pill log-filter-btn" data-filter="XREF" style="padding: 2px 8px; font-size: 10px;">XREFs</button>
                                     <button class="btn-glass-pill log-filter-btn" data-filter="ZYDIS" style="padding: 2px 8px; font-size: 10px;">Zydis</button>
-                                    <button class="btn-glass-pill log-filter-btn" data-filter="HASH" style="padding: 2px 8px; font-size: 10px;">Hash</button>
+                                    <button class="btn-glass-pill log-filter-btn" data-filter="DECOMP" style="padding: 2px 8px; font-size: 10px;">Decomp</button>
+                                    <button class="btn-glass-pill log-filter-btn" data-filter="HEADER" style="padding: 2px 8px; font-size: 10px;">Header</button>
                                     <button class="btn-glass-pill log-filter-btn" data-filter="ASSESS" style="padding: 2px 8px; font-size: 10px;">Assess</button>
                                 </div>
                             </div>
@@ -265,6 +269,103 @@
                                         </tr>
                                     </tbody>
                                 </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Tab 4: Decompiler & Reverse Engineering -->
+                    <div class="tab-pane" id="pane-decompile">
+                        <div class="decompiler-layout">
+                            <!-- Left: Subroutines / Functions Explorer -->
+                            <div class="decompile-sidebar">
+                                <div class="decompile-sidebar-header">
+                                    <span style="font-weight: 600; color: var(--text-primary);">Subroutines</span>
+                                    <span class="decompile-badge" id="func-count-badge">0 functions</span>
+                                </div>
+                                <div class="decompile-search-box">
+                                    <input type="text" id="func-search-input" placeholder="Filter by name, RVA, or tag..." class="decompile-input" />
+                                </div>
+                                <div class="decompile-func-list" id="func-list-container">
+                                    <div class="func-empty-state">No binary ingested yet. Standby for target drop.</div>
+                                </div>
+                            </div>
+
+                            <!-- Right: Disassembly & Pseudocode Viewer -->
+                            <div class="decompile-main">
+                                <div class="decompile-main-header">
+                                    <div class="func-headline">
+                                        <span class="func-title" id="active-func-name">Select a subroutine</span>
+                                        <div class="func-tags-row" id="active-func-tags"></div>
+                                    </div>
+                                    <div class="view-mode-toggle">
+                                        <button class="btn-glass-pill active" id="btn-view-pseudocode" style="padding: 4px 12px; font-size: 11px;">C pseudocode</button>
+                                        <button class="btn-glass-pill" id="btn-view-disasm" style="padding: 4px 12px; font-size: 11px;">Disassembly (x86/x64)</button>
+                                        <button class="btn-glass-pill" id="btn-copy-code" style="padding: 4px 10px; font-size: 11px;">Copy code</button>
+                                    </div>
+                                </div>
+
+                                <!-- Subroutine Metrics Bar -->
+                                <div class="func-metrics-bar" id="func-metrics-bar">
+                                    <div class="func-metric-item">
+                                        <span class="f-lbl">Entry RVA</span>
+                                        <span class="f-val" id="metric-rva">0x0000</span>
+                                    </div>
+                                    <div class="func-metric-item">
+                                        <span class="f-lbl">Binary size</span>
+                                        <span class="f-val" id="metric-size">0 bytes</span>
+                                    </div>
+                                    <div class="func-metric-item">
+                                        <span class="f-lbl">Instructions</span>
+                                        <span class="f-val" id="metric-instrs">0</span>
+                                    </div>
+                                    <div class="func-metric-item">
+                                        <span class="f-lbl">Branch edges</span>
+                                        <span class="f-val" id="metric-branches">0</span>
+                                    </div>
+                                    <div class="func-metric-item">
+                                        <span class="f-lbl">IAT XREFs</span>
+                                        <span class="f-val" id="metric-xrefs">0</span>
+                                    </div>
+                                </div>
+
+                                <!-- View 1: C Pseudocode View -->
+                                <div class="code-viewer-container active" id="code-viewer-pseudocode">
+                                    <div class="pseudocode-scroll">
+                                        <pre class="pseudocode-content" id="pseudocode-text">// Decompiled C pseudocode will appear here after selecting a function.</pre>
+                                    </div>
+                                </div>
+
+                                <!-- View 2: Instruction Disassembly Grid View -->
+                                <div class="code-viewer-container" id="code-viewer-disasm">
+                                    <div class="data-table-container" style="max-height: 440px;">
+                                        <table class="glass-table disasm-table">
+                                            <thead>
+                                                <tr>
+                                                    <th style="width: 90px;">RVA</th>
+                                                    <th style="width: 130px;">Machine hex</th>
+                                                    <th style="width: 80px;">Mnemonic</th>
+                                                    <th style="width: 200px;">Operands</th>
+                                                    <th>Analysis / cross-reference</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="disasm-table-body">
+                                                <tr>
+                                                    <td colspan="5" style="color: var(--text-dim); text-align: center; padding: 24px;">Select a subroutine to inspect instruction disassembly.</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+
+                                <!-- Cross References & API Calls footer card -->
+                                <div class="xrefs-subcard" id="xrefs-subcard">
+                                    <div class="xrefs-header">
+                                        <span>Subroutine cross-references and target invocations</span>
+                                    </div>
+                                    <div class="xrefs-list" id="xrefs-list-container">
+                                        <span style="color: var(--text-dim); font-size: 11px;">No unresolved external cross-references.</span>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>

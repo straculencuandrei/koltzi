@@ -109,6 +109,30 @@ struct TriageLogEntry {
     std::string message;
 };
 
+struct DisassembledInstruction {
+    uint64_t rva = 0;
+    std::string hexBytes;
+    std::string mnemonic;
+    std::string operands;
+    std::string comment;
+};
+
+struct DecompiledFunction {
+    uint64_t rva = 0;
+    std::string name;
+    uint32_t size = 0;
+    uint32_t instructionCount = 0;
+    uint32_t branchCount = 0;
+    bool hasSyscall = false;
+    bool hasPebAccess = false;
+    bool hasApiHash = false;
+    bool hasInjection = false;
+    bool isEntryPoint = false;
+    std::vector<std::string> calledApis;
+    std::vector<DisassembledInstruction> instructions;
+    std::vector<std::string> pseudocodeLines;
+};
+
 struct TriageReport {
     bool parseSuccess = false;
     std::string parseError;
@@ -147,6 +171,7 @@ struct TriageReport {
     std::vector<ApiHashFinding> apiHashLoops;
     InjectionChainFinding injectionChain;
     std::vector<StringFinding> sensitiveStrings;
+    std::vector<DecompiledFunction> decompiledFunctions;
 
     // Detailed Audit & Triage Log
     std::vector<TriageLogEntry> logEntries;
@@ -160,6 +185,10 @@ struct TriageReport {
         entry.level = level;
         entry.message = msg;
         logEntries.push_back(std::move(entry));
+    }
+
+    void Log(const std::string& subsystemName, const std::string& level, const std::string& msg, double timeMs = 0.0) {
+        AddLog(subsystemName, level, msg, timeMs);
     }
 
     double analysisTimeMs = 0.0;
@@ -290,6 +319,45 @@ struct TriageReport {
             json += "      \"subsystem\": \"" + EscapeJson(le.subsystem) + "\",\n";
             json += "      \"message\": \"" + EscapeJson(le.message) + "\"\n";
             json += "    }" + std::string(i + 1 < logEntries.size() ? "," : "") + "\n";
+        }
+        json += "  ],\n";
+        json += "  \"decompiledFunctions\": [\n";
+        for (size_t i = 0; i < decompiledFunctions.size(); ++i) {
+            const auto& fn = decompiledFunctions[i];
+            json += "    {\n";
+            json += "      \"rva\": " + std::to_string(fn.rva) + ",\n";
+            json += "      \"name\": \"" + EscapeJson(fn.name) + "\",\n";
+            json += "      \"size\": " + std::to_string(fn.size) + ",\n";
+            json += "      \"instructionCount\": " + std::to_string(fn.instructionCount) + ",\n";
+            json += "      \"branchCount\": " + std::to_string(fn.branchCount) + ",\n";
+            json += "      \"hasSyscall\": " + std::string(fn.hasSyscall ? "true" : "false") + ",\n";
+            json += "      \"hasPebAccess\": " + std::string(fn.hasPebAccess ? "true" : "false") + ",\n";
+            json += "      \"hasApiHash\": " + std::string(fn.hasApiHash ? "true" : "false") + ",\n";
+            json += "      \"hasInjection\": " + std::string(fn.hasInjection ? "true" : "false") + ",\n";
+            json += "      \"isEntryPoint\": " + std::string(fn.isEntryPoint ? "true" : "false") + ",\n";
+            json += "      \"calledApis\": [";
+            for (size_t j = 0; j < fn.calledApis.size(); ++j) {
+                json += "\"" + EscapeJson(fn.calledApis[j]) + "\"" + (j + 1 < fn.calledApis.size() ? ", " : "");
+            }
+            json += "],\n";
+            json += "      \"instructions\": [\n";
+            for (size_t j = 0; j < fn.instructions.size(); ++j) {
+                const auto& in = fn.instructions[j];
+                json += "        {\n";
+                json += "          \"rva\": " + std::to_string(in.rva) + ",\n";
+                json += "          \"hex\": \"" + EscapeJson(in.hexBytes) + "\",\n";
+                json += "          \"mnemonic\": \"" + EscapeJson(in.mnemonic) + "\",\n";
+                json += "          \"operands\": \"" + EscapeJson(in.operands) + "\",\n";
+                json += "          \"comment\": \"" + EscapeJson(in.comment) + "\"\n";
+                json += "        }" + std::string(j + 1 < fn.instructions.size() ? "," : "") + "\n";
+            }
+            json += "      ],\n";
+            json += "      \"pseudocode\": [\n";
+            for (size_t j = 0; j < fn.pseudocodeLines.size(); ++j) {
+                json += "        \"" + EscapeJson(fn.pseudocodeLines[j]) + "\"" + (j + 1 < fn.pseudocodeLines.size() ? "," : "") + "\n";
+            }
+            json += "      ]\n";
+            json += "    }" + std::string(i + 1 < decompiledFunctions.size() ? "," : "") + "\n";
         }
         json += "  ]\n";
         json += "}\n";

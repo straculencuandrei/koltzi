@@ -132,6 +132,9 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             if (filePath) {
+                // Automatically open telemetry log window on drop to show every action and path taken
+                const telTab = document.getElementById('tab-telemetry-btn');
+                if (telTab) telTab.click();
                 analyzeFile(filePath);
             } else {
                 ghost.setMood('puzzled');
@@ -176,6 +179,10 @@ document.addEventListener('DOMContentLoaded', () => {
         sampleBtns.forEach(b => b.classList.remove('active'));
         ghost.setMood('sniffing');
         ghost.setDialogue(`Ingesting target binary. Parsing PE headers, validating digital certificates, and scanning instruction streams.`, false);
+
+        // Open telemetry log window immediately so user sees every action taken
+        const telTab = document.getElementById('tab-telemetry-btn');
+        if (telTab) telTab.click();
 
         if (window.koltzi) {
             try {
@@ -309,6 +316,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const logCount = (report.logEntries || []).length;
         document.getElementById('tab-telemetry-btn').textContent = `Telemetry log (${logCount})`;
         renderTelemetryTable();
+
+        // Decompiler and Reverse Engineering functions
+        const decompCount = (report.decompiledFunctions || []).length;
+        const tabDecompBtn = document.getElementById('tab-decompile-btn');
+        if (tabDecompBtn) {
+            tabDecompBtn.textContent = `Decompiler & RE (${decompCount})`;
+        }
+        renderDecompiler(report);
     }
 
     function renderFindings(report) {
@@ -475,6 +490,229 @@ document.addEventListener('DOMContentLoaded', () => {
             '"': '&quot;',
             "'": '&#39;'
         }[s]));
+    }
+
+    // 10. Decompiler and Reverse Engineering Module
+    let selectedFuncIndex = 0;
+    let decompileMode = 'pseudocode';
+    let funcSearchQuery = '';
+
+    const btnViewPseudocode = document.getElementById('btn-view-pseudocode');
+    const btnViewDisasm = document.getElementById('btn-view-disasm');
+    const btnCopyCode = document.getElementById('btn-copy-code');
+    const funcSearchInput = document.getElementById('func-search-input');
+
+    if (btnViewPseudocode && btnViewDisasm) {
+        btnViewPseudocode.addEventListener('click', () => {
+            decompileMode = 'pseudocode';
+            btnViewPseudocode.classList.add('active');
+            btnViewDisasm.classList.remove('active');
+            document.getElementById('code-viewer-pseudocode').classList.add('active');
+            document.getElementById('code-viewer-disasm').classList.remove('active');
+        });
+
+        btnViewDisasm.addEventListener('click', () => {
+            decompileMode = 'disasm';
+            btnViewDisasm.classList.add('active');
+            btnViewPseudocode.classList.remove('active');
+            document.getElementById('code-viewer-disasm').classList.add('active');
+            document.getElementById('code-viewer-pseudocode').classList.remove('active');
+        });
+    }
+
+    if (btnCopyCode) {
+        btnCopyCode.addEventListener('click', () => {
+            if (!currentReport || !currentReport.decompiledFunctions || !currentReport.decompiledFunctions[selectedFuncIndex]) return;
+            const fn = currentReport.decompiledFunctions[selectedFuncIndex];
+            let copyText = '';
+            if (decompileMode === 'pseudocode') {
+                copyText = (fn.pseudocode || []).join('\n');
+            } else {
+                copyText = (fn.instructions || []).map(ins => {
+                    const rvaStr = '0x' + (ins.rva || 0).toString(16).toUpperCase();
+                    return `${rvaStr.padEnd(10)} ${(ins.mnemonic || '').padEnd(8)} ${(ins.operands || '').padEnd(24)} ${ins.comment ? '// ' + ins.comment : ''}`;
+                }).join('\n');
+            }
+            navigator.clipboard.writeText(copyText);
+            const orig = btnCopyCode.textContent;
+            btnCopyCode.textContent = 'Copied!';
+            setTimeout(() => { btnCopyCode.textContent = orig; }, 1200);
+        });
+    }
+
+    if (funcSearchInput) {
+        funcSearchInput.addEventListener('input', (e) => {
+            funcSearchQuery = e.target.value.toLowerCase().trim();
+            renderFunctionList();
+        });
+    }
+
+    function renderDecompiler(report) {
+        selectedFuncIndex = 0;
+        const funcs = report.decompiledFunctions || [];
+        const badge = document.getElementById('func-count-badge');
+        if (badge) badge.textContent = `${funcs.length} functions`;
+
+        renderFunctionList();
+        renderActiveFunction();
+    }
+
+    function renderFunctionList() {
+        const container = document.getElementById('func-list-container');
+        if (!container) return;
+        container.innerHTML = '';
+
+        if (!currentReport || !currentReport.decompiledFunctions || currentReport.decompiledFunctions.length === 0) {
+            container.innerHTML = '<div class="func-empty-state">No decompiled subroutines discovered in binary.</div>';
+            return;
+        }
+
+        const funcs = currentReport.decompiledFunctions;
+        let matches = 0;
+
+        funcs.forEach((fn, idx) => {
+            const rvaHex = '0x' + (fn.rva || 0).toString(16).toUpperCase();
+            const searchKey = `${fn.name} ${rvaHex} ${fn.hasSyscall ? 'syscall' : ''} ${fn.hasPebAccess ? 'peb' : ''} ${fn.hasApiHash ? 'apihash' : ''} ${fn.isEntryPoint ? 'entry' : ''}`.toLowerCase();
+
+            if (funcSearchQuery && !searchKey.includes(funcSearchQuery)) {
+                return;
+            }
+            matches++;
+
+            const card = document.createElement('div');
+            card.className = `func-card ${idx === selectedFuncIndex ? 'active' : ''}`;
+            card.setAttribute('data-index', idx);
+
+            let tagsHtml = '';
+            if (fn.isEntryPoint) tagsHtml += '<span class="func-mini-pill entry">Entry</span>';
+            if (fn.hasSyscall) tagsHtml += '<span class="func-mini-pill syscall">Syscall</span>';
+            if (fn.hasPebAccess) tagsHtml += '<span class="func-mini-pill peb">PEB</span>';
+            if (fn.hasApiHash) tagsHtml += '<span class="func-mini-pill apihash">API Hash</span>';
+            if (fn.branchCount > 0) tagsHtml += `<span class="func-mini-pill branch">${fn.branchCount} br</span>`;
+
+            card.innerHTML = `
+                <div class="func-card-name">${escapeHtml(fn.name)}</div>
+                <div class="func-card-meta">
+                    <span>${rvaHex}</span>
+                    <span>${fn.instructionCount || 0} instrs (${fn.size || 0} B)</span>
+                </div>
+                ${tagsHtml ? `<div class="func-card-tags">${tagsHtml}</div>` : ''}
+            `;
+
+            card.addEventListener('click', () => {
+                selectedFuncIndex = idx;
+                document.querySelectorAll('.func-card').forEach(c => c.classList.remove('active'));
+                card.classList.add('active');
+                renderActiveFunction();
+            });
+
+            container.appendChild(card);
+        });
+
+        if (matches === 0) {
+            container.innerHTML = `<div class="func-empty-state">No functions match "${escapeHtml(funcSearchQuery)}"</div>`;
+        }
+    }
+
+    function renderActiveFunction() {
+        if (!currentReport || !currentReport.decompiledFunctions || !currentReport.decompiledFunctions[selectedFuncIndex]) {
+            const nameEl = document.getElementById('active-func-name');
+            if (nameEl) nameEl.textContent = 'No function selected';
+            const tagsEl = document.getElementById('active-func-tags');
+            if (tagsEl) tagsEl.innerHTML = '';
+            const pseudoEl = document.getElementById('pseudocode-text');
+            if (pseudoEl) pseudoEl.textContent = '// No function selected';
+            const disBody = document.getElementById('disasm-table-body');
+            if (disBody) disBody.innerHTML = '<tr><td colspan="5" style="color: var(--text-dim); text-align: center; padding: 24px;">No function selected</td></tr>';
+            return;
+        }
+
+        const fn = currentReport.decompiledFunctions[selectedFuncIndex];
+        const rvaHex = '0x' + (fn.rva || 0).toString(16).toUpperCase();
+
+        document.getElementById('active-func-name').textContent = `${fn.name} [${rvaHex}]`;
+
+        // Tags
+        const tagsContainer = document.getElementById('active-func-tags');
+        tagsContainer.innerHTML = '';
+        if (fn.isEntryPoint) tagsContainer.innerHTML += '<span class="func-mini-pill entry">Application Entry</span>';
+        if (fn.hasSyscall) tagsContainer.innerHTML += '<span class="func-mini-pill syscall">Direct Syscall</span>';
+        if (fn.hasPebAccess) tagsContainer.innerHTML += '<span class="func-mini-pill peb">PEB Access</span>';
+        if (fn.hasApiHash) tagsContainer.innerHTML += '<span class="func-mini-pill apihash">API Hashing</span>';
+        if (fn.hasInjection) tagsContainer.innerHTML += '<span class="func-mini-pill syscall">Injection Chain</span>';
+
+        // Metrics Bar
+        document.getElementById('metric-rva').textContent = rvaHex;
+        document.getElementById('metric-size').textContent = `${fn.size || 0} bytes`;
+        document.getElementById('metric-instrs').textContent = fn.instructionCount || (fn.instructions ? fn.instructions.length : 0);
+        document.getElementById('metric-branches').textContent = fn.branchCount || 0;
+        document.getElementById('metric-xrefs').textContent = (fn.calledApis || []).length;
+
+        // Render Pseudocode
+        const pseudoLines = fn.pseudocode || [];
+        const pseudoElem = document.getElementById('pseudocode-text');
+        if (pseudoLines.length > 0) {
+            pseudoElem.innerHTML = pseudoLines.map((line, lIdx) => {
+                const lineNum = (lIdx + 1).toString().padStart(2, ' ');
+                let formatted = escapeHtml(line);
+                // Syntax colorize keywords
+                formatted = formatted
+                    .replace(/\b(int64_t|void|uint64_t|uint32_t|uint8_t|byte)\b/g, '<span style="color: #38bdf8; font-weight: 600;">$1</span>')
+                    .replace(/\b(return|goto|if|else|while|for)\b/g, '<span style="color: #c084fc; font-weight: 600;">$1</span>')
+                    .replace(/\b(__syscall|__readgsqword|__readfsdword)\b/g, '<span style="color: #f59e0b; font-weight: 600;">$1</span>')
+                    .replace(/(\/\/.*$)/g, '<span style="color: #10b981; font-style: italic;">$1</span>');
+
+                return `<div class="pseudocode-line"><span class="pseudocode-ln">${lineNum}</span><span class="pseudocode-code">${formatted}</span></div>`;
+            }).join('');
+        } else {
+            pseudoElem.innerHTML = '// No C pseudocode generated for this leaf stub.';
+        }
+
+        // Render Disassembly Table
+        const disasmBody = document.getElementById('disasm-table-body');
+        disasmBody.innerHTML = '';
+        const instrs = fn.instructions || [];
+
+        if (instrs.length === 0) {
+            disasmBody.innerHTML = '<tr><td colspan="5" style="color: var(--text-dim); text-align: center; padding: 24px;">No disassembled instructions available.</td></tr>';
+        } else {
+            instrs.forEach(ins => {
+                const tr = document.createElement('tr');
+                const iRvaHex = '0x' + (ins.rva || 0).toString(16).toUpperCase();
+                const mnem = (ins.mnemonic || '').toLowerCase();
+
+                let mnemClass = '';
+                if (mnem === 'call') mnemClass = 'call';
+                else if (mnem.startsWith('j')) mnemClass = 'jump';
+                else if (mnem === 'syscall' || mnem === 'sysenter') mnemClass = 'syscall';
+                else if (mnem === 'ret') mnemClass = 'ret';
+
+                tr.innerHTML = `
+                    <td class="disasm-rva">${iRvaHex}</td>
+                    <td class="disasm-hex">${escapeHtml(ins.hex || '')}</td>
+                    <td class="disasm-mnemonic ${mnemClass}">${escapeHtml(ins.mnemonic || '')}</td>
+                    <td class="disasm-operands">${escapeHtml(ins.operands || '')}</td>
+                    <td class="disasm-comment">${escapeHtml(ins.comment || '')}</td>
+                `;
+                disasmBody.appendChild(tr);
+            });
+        }
+
+        // Cross-References & API Calls
+        const xrefsContainer = document.getElementById('xrefs-list-container');
+        xrefsContainer.innerHTML = '';
+        const apis = fn.calledApis || [];
+
+        if (apis.length === 0) {
+            xrefsContainer.innerHTML = '<span style="color: var(--text-dim); font-size: 11px;">Leaf routine. No external IAT API invocations detected.</span>';
+        } else {
+            apis.forEach(api => {
+                const pill = document.createElement('span');
+                pill.className = 'xref-pill';
+                pill.textContent = api;
+                xrefsContainer.appendChild(pill);
+            });
+        }
     }
 
     // Auto-load clean sample on initial launch

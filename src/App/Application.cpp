@@ -85,6 +85,34 @@ void Application::HandleMenuCommand(int cmd) {
     }
 }
 
+static void LogPeIngestionSteps([[maybe_unused]] const PeReader& pe, TriageReport& report) {
+    report.Log("INGEST", "INFO", "Target binary ingested (" + report.fileName + ", " + FormatFileSize(report.fileSize) + ", " + (report.is64Bit ? "x64" : "x86") + ")");
+    report.Log("HEADER", "INFO", "PE Header parsed. Machine=" + report.machineType + ", Subsystem=" + report.subsystem + ", EntryPoint=0x" + std::format("{:X}", report.entryPointRva));
+
+    for (const auto& sec : report.sections) {
+        std::string perms;
+        if (sec.characteristics & 0x20000000) perms += "X";
+        if (sec.characteristics & 0x40000000) perms += "R";
+        if (sec.characteristics & 0x80000000) perms += "W";
+        report.Log("SECTION", "DEBUG", "Mapped section " + sec.name + " at RVA 0x" + std::format("{:X}", sec.virtualAddress) + " (Size " + std::to_string(sec.virtualSize) + " bytes, Entropy " + std::format("{:.2f}", sec.entropy) + ", Perms " + (perms.empty() ? "None" : perms) + ")");
+    }
+
+    size_t totalImports = 0;
+    for (const auto& imp : report.imports) {
+        totalImports += imp.functions.size();
+    }
+    report.Log("IMPORT", "INFO", "Import Address Table resolved with " + std::to_string(report.imports.size()) + " modules and " + std::to_string(totalImports) + " imported symbols");
+
+    if (!report.sha256.empty()) {
+        report.Log("CRYPTO", "INFO", "Cryptographic fingerprint SHA-256=" + report.sha256 + " Imphash=" + (report.imphash.empty() ? "N/A" : report.imphash));
+    }
+    if (report.signature.isSigned) {
+        report.Log("AUTH", "INFO", "Authenticode digital signature verified for " + report.signature.signerSubject + " (" + report.signature.statusText + ")");
+    } else {
+        report.Log("AUTH", "INFO", "Authenticode signature absent or unsigned binary");
+    }
+}
+
 void Application::TriageFileAsync(const std::wstring& filePath) {
     m_window->SetMood(GhostMood::Sniffing);
     m_window->SetDialogue("Ingesting target binary. Parsing PE headers, validating digital certificates, and scanning instruction streams.", false);
@@ -135,6 +163,9 @@ void Application::TriageFileAsync(const std::wstring& filePath) {
 
             // Verify Authenticode Digital Signature
             CryptoVerifier::VerifyAuthenticode(filePath, pe.GetBaseAddress(), pe.GetFileSize(), *report);
+
+            // Log ingestion milestones
+            LogPeIngestionSteps(pe, *report);
 
             // Run Zydis instruction sweeper
             m_instructionScanner.Scan(pe, *report);
@@ -200,6 +231,7 @@ void Application::TriageMemoryAsync(const uint8_t* data, size_t size, const std:
 
             CryptoVerifier::ComputeHashes(pe.GetBaseAddress(), pe.GetFileSize(), report->imports, *report);
             CryptoVerifier::VerifyAuthenticode(L"", pe.GetBaseAddress(), pe.GetFileSize(), *report);
+            LogPeIngestionSteps(pe, *report);
             m_instructionScanner.Scan(pe, *report);
             m_stringScanner.Scan(pe, *report);
             ThreatAssessor::Assess(pe, *report);
@@ -259,6 +291,7 @@ bool Application::TriageFileCli(const std::wstring& filePath) {
 
     CryptoVerifier::ComputeHashes(pe.GetBaseAddress(), pe.GetFileSize(), report.imports, report);
     CryptoVerifier::VerifyAuthenticode(filePath, pe.GetBaseAddress(), pe.GetFileSize(), report);
+    LogPeIngestionSteps(pe, report);
     m_instructionScanner.Scan(pe, report);
     m_stringScanner.Scan(pe, report);
     ThreatAssessor::Assess(pe, report);
@@ -365,6 +398,7 @@ bool Application::TriageFileJson(const std::wstring& filePath) {
     pe.DetectInstaller(report);
     CryptoVerifier::ComputeHashes(pe.GetBaseAddress(), pe.GetFileSize(), report.imports, report);
     CryptoVerifier::VerifyAuthenticode(filePath, pe.GetBaseAddress(), pe.GetFileSize(), report);
+    LogPeIngestionSteps(pe, report);
     m_instructionScanner.Scan(pe, report);
     m_stringScanner.Scan(pe, report);
     ThreatAssessor::Assess(pe, report);
@@ -426,6 +460,7 @@ bool Application::TriageSampleJson(const std::string& sampleType) {
     pe.DetectInstaller(report);
     CryptoVerifier::ComputeHashes(pe.GetBaseAddress(), pe.GetFileSize(), report.imports, report);
     CryptoVerifier::VerifyAuthenticode(L"", pe.GetBaseAddress(), pe.GetFileSize(), report);
+    LogPeIngestionSteps(pe, report);
     m_instructionScanner.Scan(pe, report);
     m_stringScanner.Scan(pe, report);
     ThreatAssessor::Assess(pe, report);

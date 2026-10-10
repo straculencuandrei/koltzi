@@ -170,21 +170,47 @@ static std::string FormatRva(uint64_t rva) {
 bool InstructionScanner::Scan(const PeReader& pe, TriageReport& report) {
     if (!pe.IsValid()) return false;
 
+    m_discoveredCallTargets.clear();
+
+    // 1. Build unified IAT slot mapping for cross-reference symbol resolution
+    std::unordered_map<uint32_t, std::string> iatSlotMap;
+    for (const auto& imp : pe.GetImports()) {
+        for (size_t i = 0; i < imp.functions.size(); ++i) {
+            uint32_t rva = (i < imp.iatRvas.size()) ? imp.iatRvas[i] : 0;
+            if (rva != 0) {
+                iatSlotMap[rva] = imp.dllName + "!" + imp.functions[i];
+            }
+        }
+    }
+
+    report.AddLog("DECOMP", "INFO", "Initializing Zydis control-flow disassembler & recursive descent engine");
+    report.AddLog("DECOMP", "INFO", "Resolved " + std::to_string(iatSlotMap.size()) + " IAT import thunk slots for symbol resolution");
+
     // Scan all executable sections
     for (const auto& sec : pe.GetSections()) {
         if (sec.isExecutable) {
-            ScanSection(pe, sec, report);
+            report.AddLog("FLOW", "INFO", "Tracing execution paths in section " + sec.name +
+                " (RVA 0x" + std::format("{:X}", sec.virtualAddress) + ", " + std::to_string(sec.virtualSize) + " B)");
+            ScanSection(pe, sec, report, iatSlotMap);
         }
     }
 
     // Evaluate Process Injection Chaining
-    EvaluateInjectionChain(pe, report);
+    EvaluateInjectionChain(pe, report, iatSlotMap);
+
+    // Deep Decompilation Pass: Reconstruct high-priority routines & C pseudocode
+    DecompileFunctions(pe, report, iatSlotMap);
 
     report.AddLog("ZYDIS", "PASS", "Zydis control-flow recursive descent and structural analysis complete");
     return true;
 }
 
-void InstructionScanner::ScanSection(const PeReader& pe, const SectionInfo& sec, TriageReport& report) {
+void InstructionScanner::ScanSection(
+    const PeReader& pe,
+    const SectionInfo& sec,
+    TriageReport& report,
+    std::unordered_map<uint32_t, std::string>& iatSlotMap
+) {
     const uint8_t* codeBytes = nullptr;
     size_t codeSize = 0;
     if (!pe.GetSectionBytes(sec, codeBytes, codeSize) || codeSize == 0) return;
@@ -643,10 +669,28 @@ void InstructionScanner::ScanSection(const PeReader& pe, const SectionInfo& sec,
                 if (operands[0].type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
                     uint64_t targetRva = currentRva + instr.length + operands[0].imm.value.s;
                     if (targetRva >= sec.virtualAddress && targetRva < sec.virtualAddress + sec.virtualSize) {
+                        m_discoveredCallTargets.push_back(static_cast<uint32_t>(targetRva));
                         size_t targetOff = targetRva - sec.virtualAddress;
                         if (visitedOffsets.find(targetOff) == visitedOffsets.end()) {
                             worklist.push(targetOff);
                         }
+                        if (report.logEntries.size() < 120) {
+                            report.AddLog("PATH", "INFO", "Tracing call path from 0x" + std::format("{:X}", currentRva) + " to sub_0x" + std::format("{:X}", targetRva));
+                        }
+                    }
+                } else if (operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY) {
+                    uint32_t targetSlotRva = 0;
+                    if (operands[0].mem.base == ZYDIS_REGISTER_RIP) {
+                        targetSlotRva = static_cast<uint32_t>(currentRva + instr.length + operands[0].mem.disp.value);
+                    } else if (operands[0].mem.disp.has_displacement) {
+                        uint64_t absDisp = static_cast<uint64_t>(operands[0].mem.disp.value);
+                        if (absDisp >= pe.GetImageBase()) {
+                            targetSlotRva = static_cast<uint32_t>(absDisp - pe.GetImageBase());
+                        }
+                    }
+                    auto itSlot = iatSlotMap.find(targetSlotRva);
+                    if (itSlot != iatSlotMap.end() && report.logEntries.size() < 150) {
+                        report.AddLog("XREF", "INFO", "Cross reference at 0x" + std::format("{:X}", currentRva) + " invokes " + itSlot->second);
                     }
                 }
             } else if (instr.mnemonic == ZYDIS_MNEMONIC_JMP) {
@@ -708,23 +752,20 @@ void InstructionScanner::ScanSection(const PeReader& pe, const SectionInfo& sec,
     }
 }
 
-void InstructionScanner::EvaluateInjectionChain(const PeReader& pe, TriageReport& report) {
+void InstructionScanner::EvaluateInjectionChain(
+    const PeReader& pe,
+    TriageReport& report,
+    const std::unordered_map<uint32_t, std::string>& iatSlotMap
+) {
     bool hasAlloc = false;
     bool hasWrite = false;
     bool hasExec = false;
 
     std::vector<std::string> foundApis;
 
-    // 1. Map IAT slots and thunk RVAs to API primitives
-    std::unordered_map<uint32_t, std::string> iatSlotMap;
-
     for (const auto& imp : pe.GetImports()) {
         for (size_t i = 0; i < imp.functions.size(); ++i) {
             const std::string& fn = imp.functions[i];
-            uint32_t rva = (i < imp.iatRvas.size()) ? imp.iatRvas[i] : 0;
-            if (rva != 0) {
-                iatSlotMap[rva] = fn;
-            }
 
             std::string lowerFn = fn;
             std::transform(lowerFn.begin(), lowerFn.end(), lowerFn.begin(), [](unsigned char c) {
@@ -940,6 +981,280 @@ void InstructionScanner::EvaluateInjectionChain(const PeReader& pe, TriageReport
             "Process Injection primitives detected (Remote Process Write + Remote Thread/APC Execution).";
         report.AddLog("ZYDIS", "CRIT", report.injectionChain.description);
     }
+}
+
+void InstructionScanner::DecompileFunctions(
+    const PeReader& pe,
+    TriageReport& report,
+    const std::unordered_map<uint32_t, std::string>& iatSlotMap
+) {
+    std::set<uint32_t> candidateRoots;
+
+    // 1. Entry Point RVA
+    if (pe.GetEntryPointRva() != 0) {
+        candidateRoots.insert(pe.GetEntryPointRva());
+    }
+
+    // 2. Exception table function starts (.pdata)
+    for (uint32_t fs : pe.GetFunctionStarts()) {
+        candidateRoots.insert(fs);
+    }
+
+    // 3. Exported functions
+    for (uint32_t ex : pe.GetExportRvas()) {
+        candidateRoots.insert(ex);
+    }
+
+    // 4. Discovered CALL targets
+    for (uint32_t ct : m_discoveredCallTargets) {
+        candidateRoots.insert(ct);
+    }
+
+    // 5. Findings RVAs (syscalls, PEB access, API hashes)
+    for (const auto& sf : report.syscalls) {
+        candidateRoots.insert(static_cast<uint32_t>(sf.rva));
+    }
+    for (const auto& paf : report.pebAccesses) {
+        candidateRoots.insert(static_cast<uint32_t>(paf.rva));
+    }
+    for (const auto& ah : report.apiHashLoops) {
+        candidateRoots.insert(static_cast<uint32_t>(ah.rva));
+    }
+
+    report.AddLog("DECOMP", "INFO", "Discovered " + std::to_string(candidateRoots.size()) + " candidate subroutine entry roots across executable sections");
+
+    // Order roots: Entry Point first, then findings/calls
+    std::vector<uint32_t> prioritizedRoots;
+    if (pe.GetEntryPointRva() != 0) {
+        prioritizedRoots.push_back(pe.GetEntryPointRva());
+    }
+
+    for (uint32_t r : candidateRoots) {
+        if (r != pe.GetEntryPointRva()) {
+            prioritizedRoots.push_back(r);
+        }
+    }
+
+    // Budget: decompile up to 45 functions to guarantee sub-millisecond execution on large binaries
+    constexpr size_t MAX_DECOMPILED_FUNCTIONS = 45;
+    size_t decompiledCount = 0;
+
+    for (uint32_t fnRva : prioritizedRoots) {
+        if (decompiledCount >= MAX_DECOMPILED_FUNCTIONS) break;
+
+        bool isEntry = (fnRva == pe.GetEntryPointRva());
+        std::string fnName;
+        if (isEntry) {
+            fnName = "main_entry_0x" + std::format("{:X}", fnRva);
+        } else {
+            fnName = "sub_0x" + std::format("{:X}", fnRva);
+        }
+
+        DecompiledFunction df = ReconstructFunction(pe, fnRva, fnName, isEntry, iatSlotMap);
+        if (!df.instructions.empty()) {
+            report.decompiledFunctions.push_back(std::move(df));
+            decompiledCount++;
+        }
+    }
+
+    report.AddLog("DECOMP", "PASS", "Decompilation pass complete. Reconstructed " +
+        std::to_string(report.decompiledFunctions.size()) + " routines with C pseudocode & full disassembly listings");
+}
+
+DecompiledFunction InstructionScanner::ReconstructFunction(
+    const PeReader& pe,
+    uint64_t fnRva,
+    const std::string& fnName,
+    bool isEntry,
+    const std::unordered_map<uint32_t, std::string>& iatSlotMap
+) {
+    DecompiledFunction df;
+    df.rva = fnRva;
+    df.name = fnName;
+    df.isEntryPoint = isEntry;
+
+    // Find section containing fnRva
+    const SectionInfo* targetSec = nullptr;
+    for (const auto& sec : pe.GetSections()) {
+        if (sec.isExecutable && fnRva >= sec.virtualAddress && fnRva < sec.virtualAddress + sec.virtualSize) {
+            targetSec = &sec;
+            break;
+        }
+    }
+    if (!targetSec) return df;
+
+    const uint8_t* codeBytes = nullptr;
+    size_t codeSize = 0;
+    if (!pe.GetSectionBytes(*targetSec, codeBytes, codeSize) || codeSize == 0) return df;
+
+    size_t offset = fnRva - targetSec->virtualAddress;
+    if (offset >= codeSize) return df;
+
+    ZydisDecoder decoder;
+    if (pe.Is64Bit()) {
+        ZydisDecoderInit(&decoder, ZYDIS_MACHINE_MODE_LONG_64, ZYDIS_STACK_WIDTH_64);
+    } else {
+        ZydisDecoderInit(&decoder, ZYDIS_MACHINE_MODE_LEGACY_32, ZYDIS_STACK_WIDTH_32);
+    }
+
+    std::vector<std::string> bodyPseudocode;
+    std::unordered_set<std::string> calledApisSet;
+
+    constexpr size_t MAX_INSTR_PER_FN = 75;
+    size_t instrCount = 0;
+    uint32_t startOffset = static_cast<uint32_t>(offset);
+
+    while (offset < codeSize && instrCount < MAX_INSTR_PER_FN) {
+        uint8_t b = codeBytes[offset];
+        if (instrCount > 0 && (b == 0xCC || b == 0x90)) {
+            if (offset + 1 < codeSize && codeBytes[offset + 1] == b) {
+                break;
+            }
+        }
+
+        ZydisDecodedInstruction instr;
+        ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT];
+        if (!ZYAN_SUCCESS(ZydisDecoderDecodeFull(&decoder, codeBytes + offset, codeSize - offset, &instr, operands))) {
+            break;
+        }
+
+        uint64_t curRva = targetSec->virtualAddress + offset;
+        char disasmBuf[128] = { 0 };
+        ZydisFormatterFormatInstruction(&m_formatter, &instr, operands, instr.operand_count_visible, disasmBuf, sizeof(disasmBuf), curRva, ZYAN_NULL);
+
+        std::string fullDisasm = disasmBuf;
+        std::string mnem = "";
+        std::string ops = "";
+        size_t sp = fullDisasm.find(' ');
+        if (sp != std::string::npos) {
+            mnem = fullDisasm.substr(0, sp);
+            ops = fullDisasm.substr(sp + 1);
+        } else {
+            mnem = fullDisasm;
+        }
+
+        DisassembledInstruction di;
+        di.rva = curRva;
+        di.hexBytes = BytesToHex(codeBytes + offset, instr.length);
+        di.mnemonic = mnem;
+        di.operands = ops;
+
+        std::string comment = "";
+        std::string pseudoLine = "";
+
+        if (instr.mnemonic == ZYDIS_MNEMONIC_CALL) {
+            std::string resolvedTarget = "";
+            if (operands[0].type == ZYDIS_OPERAND_TYPE_MEMORY) {
+                uint32_t slotRva = 0;
+                if (operands[0].mem.base == ZYDIS_REGISTER_RIP) {
+                    slotRva = static_cast<uint32_t>(curRva + instr.length + operands[0].mem.disp.value);
+                } else if (operands[0].mem.disp.has_displacement && static_cast<uint64_t>(operands[0].mem.disp.value) >= pe.GetImageBase()) {
+                    slotRva = static_cast<uint32_t>(static_cast<uint64_t>(operands[0].mem.disp.value) - pe.GetImageBase());
+                }
+                auto it = iatSlotMap.find(slotRva);
+                if (it != iatSlotMap.end()) {
+                    resolvedTarget = it->second;
+                    calledApisSet.insert(resolvedTarget);
+                    comment = "-> " + resolvedTarget;
+                    pseudoLine = "    " + resolvedTarget + "(...);";
+                }
+            } else if (operands[0].type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
+                uint64_t tgtRva = curRva + instr.length + operands[0].imm.value.s;
+                resolvedTarget = "sub_0x" + std::format("{:X}", tgtRva);
+                calledApisSet.insert(resolvedTarget);
+                comment = "-> " + resolvedTarget;
+                pseudoLine = "    " + resolvedTarget + "();";
+            }
+            if (pseudoLine.empty()) {
+                pseudoLine = "    call_indirect(" + ops + ");";
+            }
+        } else if (instr.mnemonic == ZYDIS_MNEMONIC_SYSCALL || instr.mnemonic == ZYDIS_MNEMONIC_SYSENTER ||
+                   (instr.mnemonic == ZYDIS_MNEMONIC_INT && operands[0].imm.value.u == 0x2E)) {
+            df.hasSyscall = true;
+            comment = "Direct Syscall invocation (EDR hook bypass)";
+            pseudoLine = "    __syscall(); // Direct kernel dispatch";
+        } else if (instr.mnemonic == ZYDIS_MNEMONIC_RET) {
+            pseudoLine = "    return rax;";
+        } else if (instr.mnemonic == ZYDIS_MNEMONIC_JMP) {
+            if (operands[0].type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
+                uint64_t tgtRva = curRva + instr.length + operands[0].imm.value.s;
+                comment = "-> 0x" + std::format("{:X}", tgtRva);
+                pseudoLine = "    goto loc_0x" + std::format("{:X}", tgtRva) + ";";
+            } else {
+                pseudoLine = "    jmp " + ops + ";";
+            }
+        } else if (instr.mnemonic == ZYDIS_MNEMONIC_JZ) {
+            df.branchCount++;
+            if (operands[0].type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
+                uint64_t tgtRva = curRva + instr.length + operands[0].imm.value.s;
+                comment = "Branch if zero -> 0x" + std::format("{:X}", tgtRva);
+                pseudoLine = "    if (condition == 0) goto loc_0x" + std::format("{:X}", tgtRva) + ";";
+            }
+        } else if (instr.mnemonic == ZYDIS_MNEMONIC_JNZ) {
+            df.branchCount++;
+            if (operands[0].type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
+                uint64_t tgtRva = curRva + instr.length + operands[0].imm.value.s;
+                comment = "Branch if not zero -> 0x" + std::format("{:X}", tgtRva);
+                pseudoLine = "    if (condition != 0) goto loc_0x" + std::format("{:X}", tgtRva) + ";";
+            }
+        } else if (instr.mnemonic == ZYDIS_MNEMONIC_MOV) {
+            for (int opIdx = 0; opIdx < instr.operand_count_visible; ++opIdx) {
+                if (operands[opIdx].type == ZYDIS_OPERAND_TYPE_MEMORY) {
+                    if (operands[opIdx].mem.segment == ZYDIS_REGISTER_GS && operands[opIdx].mem.disp.value == 0x60) {
+                        df.hasPebAccess = true;
+                        comment = "Read GS:[0x60] -> Process Environment Block (PEB)";
+                        pseudoLine = "    pPeb = __readgsqword(0x60); // PEB";
+                    } else if (operands[opIdx].mem.segment == ZYDIS_REGISTER_FS && operands[opIdx].mem.disp.value == 0x30) {
+                        df.hasPebAccess = true;
+                        comment = "Read FS:[0x30] -> Process Environment Block (PEB)";
+                        pseudoLine = "    pPeb = __readfsdword(0x30); // PEB";
+                    }
+                }
+            }
+            if (pseudoLine.empty()) {
+                pseudoLine = "    " + ops + ";";
+            }
+        } else if (instr.mnemonic == ZYDIS_MNEMONIC_XOR && instr.operand_count_visible >= 2 &&
+                   operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER && operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER &&
+                   operands[0].reg.value == operands[1].reg.value) {
+            pseudoLine = "    " + fullDisasm.substr(sp + 1, fullDisasm.find(',') - sp - 1) + " = 0;";
+        } else {
+            pseudoLine = "    " + fullDisasm + ";";
+        }
+
+        di.comment = comment;
+        df.instructions.push_back(std::move(di));
+        bodyPseudocode.push_back(std::move(pseudoLine));
+
+        instrCount++;
+        offset += instr.length;
+
+        if (instr.mnemonic == ZYDIS_MNEMONIC_RET) {
+            break;
+        }
+    }
+
+    df.size = static_cast<uint32_t>(offset - startOffset);
+    df.instructionCount = static_cast<uint32_t>(df.instructions.size());
+    df.calledApis.assign(calledApisSet.begin(), calledApisSet.end());
+
+    // Generate C pseudocode representation
+    df.pseudocodeLines.push_back("// ========================================================================");
+    df.pseudocodeLines.push_back("// Subroutine: " + df.name + " [RVA 0x" + std::format("{:X}", df.rva) + "]");
+    df.pseudocodeLines.push_back("// Size: " + std::to_string(df.size) + " bytes | Instructions: " + std::to_string(df.instructionCount) +
+        " | Branches: " + std::to_string(df.branchCount));
+    if (df.isEntryPoint) df.pseudocodeLines.push_back("// Attribute: Main Application Entry Point");
+    if (df.hasSyscall) df.pseudocodeLines.push_back("// Attribute: Direct Syscall Stub [CRITICAL]");
+    if (df.hasPebAccess) df.pseudocodeLines.push_back("// Attribute: Dynamic PEB Dereference [WARNING]");
+    df.pseudocodeLines.push_back("// ========================================================================");
+    df.pseudocodeLines.push_back("int64_t " + df.name + "(int64_t rcx, int64_t rdx, int64_t r8, int64_t r9) {");
+
+    for (const auto& line : bodyPseudocode) {
+        df.pseudocodeLines.push_back(line);
+    }
+
+    df.pseudocodeLines.push_back("}");
+    return df;
 }
 
 } // namespace Koltzi

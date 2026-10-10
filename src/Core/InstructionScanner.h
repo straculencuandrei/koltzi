@@ -35,12 +35,21 @@ public:
 
 private:
     void InitHashDatabase();
-    void ScanSection(const PeReader& pe, const SectionInfo& sec, TriageReport& report);
-    void EvaluateInjectionChain(const PeReader& pe, TriageReport& report);
+    void ScanSection(const PeReader& pe, const SectionInfo& sec, TriageReport& report, std::unordered_map<uint32_t, std::string>& iatSlotMap);
+    void EvaluateInjectionChain(const PeReader& pe, TriageReport& report, const std::unordered_map<uint32_t, std::string>& iatSlotMap);
+    void DecompileFunctions(const PeReader& pe, TriageReport& report, const std::unordered_map<uint32_t, std::string>& iatSlotMap);
+    DecompiledFunction ReconstructFunction(
+        const PeReader& pe,
+        uint64_t fnRva,
+        const std::string& fnName,
+        bool isEntry,
+        const std::unordered_map<uint32_t, std::string>& iatSlotMap
+    );
 
     ZydisFormatter m_formatter;
     std::unordered_map<uint32_t, ApiHashInfo> m_knownHashes32;
     std::unordered_map<uint64_t, ApiHashInfo> m_knownHashes64;
+    std::vector<uint32_t> m_discoveredCallTargets;
 };
 
 } // namespace Koltzi
