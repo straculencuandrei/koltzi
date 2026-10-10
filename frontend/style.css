@@ -1316,3 +1316,584 @@ body {
     color: var(--accent-cyan);
     border: 1px solid rgba(56, 189, 248, 0.25);
 }
+
+/* =========================================================================
+   Attack Chain / Threat Graph Workbench (Air-Gapped Forensic Pipeline)
+   ========================================================================= */
+
+#pane-attack-chain {
+    height: 100%;
+    min-height: 580px;
+    display: none;
+    flex-direction: column;
+    gap: 12px;
+}
+
+#pane-attack-chain.active {
+    display: flex;
+}
+
+.attack-chain-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md);
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.chain-filters-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.chain-toolbar-label {
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-right: 4px;
+}
+
+.chain-filter-btn {
+    padding: 4px 12px;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: var(--radius-pill);
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.chain-filter-btn:hover {
+    background: var(--glass-fill);
+    color: var(--text-primary);
+}
+
+.chain-filter-btn.active {
+    background: var(--glass-fill-active);
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+    box-shadow: var(--glass-specular);
+}
+
+.chain-controls-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.chain-zoom-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.btn-glass-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: var(--radius-sm);
+    background: var(--glass-fill);
+    border: 1px solid var(--glass-border);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-glass-icon:hover {
+    background: var(--glass-fill-hover);
+    color: var(--text-primary);
+    border-color: var(--glass-border-hover);
+}
+
+.btn-glass-pill.btn-sm {
+    padding: 4px 10px;
+    font-size: 11px;
+}
+
+/* Pan & Zoom Canvas Stage */
+.attack-chain-stage {
+    position: relative;
+    flex: 1;
+    min-height: 520px;
+    height: 580px;
+    background: #0B0D11;
+    background-image: radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+    background-size: 24px 24px;
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    cursor: grab;
+    user-select: none;
+}
+
+.attack-chain-stage:active,
+.attack-chain-stage.panning {
+    cursor: grabbing;
+}
+
+.attack-chain-viewport {
+    position: absolute;
+    inset: 0;
+    transform-origin: 0 0;
+    will-change: transform;
+}
+
+.attack-chain-svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 1;
+    overflow: visible;
+}
+
+.chain-link-path {
+    fill: none;
+    stroke-width: 2px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    transition: stroke 0.2s ease, stroke-width 0.2s ease;
+}
+
+.chain-link-path.pass {
+    stroke: rgba(16, 185, 129, 0.7);
+    stroke-dasharray: none;
+}
+
+.chain-link-path.warn {
+    stroke: #f59e0b;
+    stroke-dasharray: 6 4;
+    animation: chainDashPulse 1.8s linear infinite;
+    filter: drop-shadow(0 0 4px rgba(245, 158, 11, 0.4));
+}
+
+.chain-link-path.critical {
+    stroke: #ef4444;
+    stroke-dasharray: 6 3;
+    animation: chainDashPulse 1.2s linear infinite;
+    filter: drop-shadow(0 0 5px rgba(239, 68, 68, 0.5));
+}
+
+@keyframes chainDashPulse {
+    to {
+        stroke-dashoffset: -18;
+    }
+}
+
+/* Nodes Layer & Columns */
+.attack-chain-nodes-layer {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: flex;
+    gap: 48px;
+    padding: 36px;
+    align-items: flex-start;
+}
+
+.chain-stage-col {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    width: 280px;
+    flex-shrink: 0;
+    transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.chain-stage-col.filtered-out {
+    opacity: 0.15;
+    pointer-events: none;
+    filter: grayscale(0.8);
+}
+
+.chain-stage-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-dim);
+}
+
+.stage-step-pill {
+    padding: 1px 6px;
+    border-radius: var(--radius-pill);
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-muted);
+    font-size: 10px;
+    font-weight: 600;
+}
+
+/* Forensic Node Card */
+.chain-node-card {
+    background: #141720;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 14px;
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.chain-node-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(255, 255, 255, 0.25);
+    box-shadow: 0 14px 32px rgba(0, 0, 0, 0.65);
+}
+
+.chain-node-card.active {
+    border-color: var(--accent-primary) !important;
+    box-shadow: 0 0 0 1px var(--accent-primary), 0 10px 28px var(--accent-glow) !important;
+}
+
+.chain-node-card.pass {
+    border-left: 3px solid #10b981;
+}
+
+.chain-node-card.warn {
+    border-left: 3px solid #f59e0b;
+}
+
+.chain-node-card.critical {
+    border-left: 3px solid #ef4444;
+}
+
+.chain-card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.chain-card-title-group {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.chain-card-stage-name {
+    font-size: 10px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+}
+
+.chain-card-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1.3;
+}
+
+.chain-card-technique {
+    font-size: 10.5px;
+    color: var(--accent-cyan);
+    font-family: var(--font-mono);
+}
+
+.chain-card-summary {
+    font-size: 11px;
+    color: var(--text-secondary);
+    line-height: 1.45;
+}
+
+.chain-card-metrics {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 4px;
+    font-size: 10px;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+}
+
+.chain-card-evidence-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.05);
+    font-size: 10px;
+    color: var(--text-muted);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* Sockets on Cards */
+.card-socket {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #141720;
+    border: 1.5px solid rgba(255, 255, 255, 0.25);
+    pointer-events: none;
+}
+
+.card-socket.socket-in {
+    left: -5px;
+}
+
+.card-socket.socket-out {
+    right: -5px;
+}
+
+/* Inspect Proof Drawer */
+.evidence-drawer {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 420px;
+    max-width: 92%;
+    background: rgba(14, 17, 24, 0.94);
+    backdrop-filter: blur(28px) saturate(180%);
+    -webkit-backdrop-filter: blur(28px) saturate(180%);
+    border-left: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: -12px 0 40px rgba(0, 0, 0, 0.65);
+    z-index: 30;
+    transform: translateX(100%);
+    transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.evidence-drawer.open {
+    transform: translateX(0);
+}
+
+.evidence-drawer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+    gap: 12px;
+}
+
+.drawer-header-title-block {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.drawer-header-sup {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-dim);
+    font-weight: 600;
+}
+
+.drawer-node-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+.drawer-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.drawer-close-btn {
+    background: transparent;
+    border: none;
+    font-size: 22px;
+    line-height: 1;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: color 0.15s ease;
+}
+
+.drawer-close-btn:hover {
+    color: var(--text-primary);
+}
+
+.evidence-drawer-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 18px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.drawer-info-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.drawer-info-item {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.drawer-lbl {
+    font-size: 10px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+}
+
+.drawer-val {
+    font-size: 11.5px;
+    color: var(--text-primary);
+}
+
+.drawer-val.mono {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    word-break: break-all;
+}
+
+.drawer-summary-card {
+    background: rgba(255, 255, 255, 0.04);
+    border-left: 3px solid var(--accent-primary);
+    border-radius: 6px;
+    padding: 10px 12px;
+    font-size: 11.5px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+}
+
+.drawer-section-heading {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    font-weight: 600;
+    margin-top: 4px;
+}
+
+.drawer-evidence-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.drawer-evidence-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.evidence-card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.evidence-type-pill {
+    padding: 2px 7px;
+    border-radius: var(--radius-pill);
+    font-size: 9.5px;
+    font-weight: 600;
+    text-transform: uppercase;
+    background: rgba(56, 189, 248, 0.12);
+    color: var(--accent-cyan);
+    border: 1px solid rgba(56, 189, 248, 0.25);
+}
+
+.evidence-rule-tag {
+    font-size: 10px;
+    color: var(--text-dim);
+    font-family: var(--font-mono);
+}
+
+.evidence-card-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.evidence-card-value {
+    background: #090B0F;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: #f1f5f9;
+    line-height: 1.45;
+    word-break: break-all;
+    max-height: 140px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+}
+
+.evidence-jump-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    border-radius: var(--radius-pill);
+    background: var(--glass-fill);
+    border: 1px solid var(--glass-border);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    cursor: pointer;
+    align-self: flex-start;
+    transition: all 0.2s ease;
+}
+
+.evidence-jump-btn:hover {
+    background: var(--glass-fill-hover);
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+    transform: translateX(2px);
+}
+
+/* Bidirectional Cross-Highlight Flash Animation */
+@keyframes flashGlow {
+    0% {
+        background-color: rgba(245, 158, 11, 0.45);
+        box-shadow: 0 0 20px rgba(245, 158, 11, 0.6);
+    }
+    100% {
+        background-color: transparent;
+        box-shadow: none;
+    }
+}
+
+.flash-highlight {
+    animation: flashGlow 2.2s cubic-bezier(0.1, 0.9, 0.2, 1) forwards !important;
+    border-radius: 4px;
+}
+

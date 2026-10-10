@@ -43,6 +43,7 @@ private:
     std::vector<uint8_t> GenerateSyscallPebSample();
     std::vector<uint8_t> GenerateCredStealerSample();
     std::vector<uint8_t> GenerateInjectionSample();
+    std::vector<uint8_t> GenerateHadesDropperSample();
 
     std::unique_ptr<GhostWindow> m_window;
     std::jthread m_workerThread;

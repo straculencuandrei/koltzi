@@ -70,6 +70,11 @@ void Application::HandleMenuCommand(int cmd) {
         TriageMemoryAsync(data.data(), data.size(), "Sample_Process_Injection.exe");
         break;
     }
+    case 2010: { // IDM_SAMPLE_HADES
+        auto data = GenerateHadesDropperSample();
+        TriageMemoryAsync(data.data(), data.size(), "UnoApp_Hades_Dropper.exe");
+        break;
+    }
     case 2007: // IDM_TOGGLE_HUD
         m_window->ToggleHUD();
         m_window->Render();
@@ -463,6 +468,9 @@ bool Application::TriageSampleJson(const std::string& sampleType) {
     } else if (sampleType == "injection") {
         buf = GenerateInjectionSample();
         name = "Sample_Process_Injection.exe";
+    } else if (sampleType == "hades" || sampleType == "uno" || sampleType == "unoapp" || sampleType == "dropper") {
+        buf = GenerateHadesDropperSample();
+        name = "UnoApp_Hades_Dropper.exe";
     } else {
         PrintToConsole("{\"parseSuccess\":false,\"parseError\":\"Unknown sample profile\"}\n");
         return false;
@@ -833,6 +841,66 @@ std::vector<uint8_t> Application::GenerateInjectionSample() {
         "WriteProcessMemory",
         "CreateRemoteThread"
     });
+}
+
+std::vector<uint8_t> Application::GenerateHadesDropperSample() {
+    // 1. Syscall stub + PEB access + API hash loop bytecode XOR-encoded with 0x77
+    const uint8_t encCode[] = {
+        0x65 ^ 0x77, 0x48 ^ 0x77, 0x8B ^ 0x77, 0x04 ^ 0x77, 0x25 ^ 0x77, 0x60 ^ 0x77, 0x00 ^ 0x77, 0x00 ^ 0x77, 0x00 ^ 0x77, // mov rax, gs:[60h]
+        0x49 ^ 0x77, 0x89 ^ 0x77, 0xCA ^ 0x77,                                                                               // mov r10, rcx
+        0xB8 ^ 0x77, 0x18 ^ 0x77, 0x00 ^ 0x77, 0x00 ^ 0x77, 0x00 ^ 0x77,                                                 // mov eax, 18h
+        0x0F ^ 0x77, 0x05 ^ 0x77,                                                                                           // syscall
+        0x31 ^ 0x77, 0xD2 ^ 0x77,                                                                                           // xor edx, edx
+        0x0F ^ 0x77, 0xB6 ^ 0x77, 0x01 ^ 0x77,                                                                               // movzx eax, byte ptr [rcx]
+        0xC1 ^ 0x77, 0xCA ^ 0x77, 0x0D ^ 0x77,                                                                               // ror edx, 0Dh
+        0x01 ^ 0x77, 0xC2 ^ 0x77,                                                                                           // add edx, eax
+        0x48 ^ 0x77, 0xFF ^ 0x77, 0xC1 ^ 0x77,                                                                               // inc rcx
+        0x85 ^ 0x77, 0xC0 ^ 0x77,                                                                                           // test eax, eax
+        0x75 ^ 0x77, 0xF2 ^ 0x77,                                                                                           // jnz loop
+        0xC3 ^ 0x77                                                                                                         // ret
+    };
+    std::vector<uint8_t> codeVec(sizeof(encCode));
+    for (size_t i = 0; i < sizeof(encCode); ++i) {
+        codeVec[i] = encCode[i] ^ 0x77;
+    }
+
+    // 2. Sensitive strings for credential harvesting and exfiltration
+    std::string artifacts;
+    artifacts += std::string("C:\\Users\\victim\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\") + "Login" + " Data";
+    artifacts.push_back('\0');
+    artifacts += std::string("C:\\Users\\victim\\AppData\\Roaming\\") + "discord" + "\\Local Storage\\leveldb";
+    artifacts.push_back('\0');
+    artifacts += std::string("nkbihfbeogaeaoehlefnkodbefgpgknn");
+    artifacts.push_back('\0');
+    artifacts += std::string("https:") + "//" + "dis" + "cord" + ".com" + "/api" + "/web" + "hooks" + "/1234567890/hades_exfil_bot";
+    artifacts.push_back('\0');
+    artifacts += std::string("https:") + "//" + "api" + ".telegram" + ".org" + "/bot" + "1234567890:HadesBotToken" + "/sendMessage";
+    artifacts.push_back('\0');
+    artifacts += std::string("V8_BYTECODE_MARKER_UNO_DESERIALIZE");
+    artifacts.push_back('\0');
+
+    std::vector<uint8_t> dataVec(artifacts.begin(), artifacts.end());
+
+    // Build base PE with injection and crypto imports
+    auto pe = BuildBasePe64(codeVec, dataVec, "KERNEL32.dll", {
+        "VirtualAllocEx",
+        "WriteProcessMemory",
+        "CreateRemoteThread"
+    });
+
+    // 3. Append high-entropy 2.2 MB NSIS overlay container (modeling Hades / UnoApp dropper)
+    const std::string nsisHeader = "NullsoftInst";
+    pe.insert(pe.end(), nsisHeader.begin(), nsisHeader.end());
+
+    std::mt19937 mt(1337);
+    std::uniform_int_distribution<int> dist(0, 255);
+    const size_t overlayPayloadSize = 2 * 1024 * 1024 + 200 * 1024; // ~2.2 MB
+    pe.reserve(pe.size() + overlayPayloadSize);
+    for (size_t i = 0; i < overlayPayloadSize; ++i) {
+        pe.push_back(static_cast<uint8_t>(dist(mt)));
+    }
+
+    return pe;
 }
 
 } // namespace Koltzi

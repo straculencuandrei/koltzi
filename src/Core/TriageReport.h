@@ -133,6 +133,29 @@ struct DecompiledFunction {
     std::vector<std::string> pseudocodeLines;
 };
 
+struct AttackChainEvidence {
+    std::string type;       // "RVA", "DISASM", "STRING", "ENTROPY", "CERT", "CONTAINER"
+    std::string label;
+    std::string value;
+    std::string rule;
+    std::string jumpTab;    // "overview", "sections", "telemetry", "decompile"
+    std::string jumpTarget; // Target identifier for cross-view navigation
+};
+
+struct AttackChainNode {
+    std::string id;            // Unique node id
+    std::string stage;         // "Delivery", "Staging", "Execution", "Defense Evasion", "Privilege Escalation", "Credential Access", "Exfiltration"
+    std::string title;         // Descriptive node title
+    std::string technique;     // MITRE ATT&CK technique code and name
+    std::string classification;// "BENIGN", "SUSPICIOUS", "CRITICAL"
+    std::string summary;       // Plain explanation of verified static evidence
+    std::string status;        // "CONFIRMED", "DETECTED", "MITIGATED"
+    uint64_t rva = 0;
+    uint64_t fileOffset = 0;
+    std::vector<std::string> nextNodeIds;
+    std::vector<AttackChainEvidence> evidenceList;
+};
+
 struct TriageReport {
     bool parseSuccess = false;
     std::string parseError;
@@ -180,6 +203,7 @@ struct TriageReport {
     InjectionChainFinding injectionChain;
     std::vector<StringFinding> sensitiveStrings;
     std::vector<DecompiledFunction> decompiledFunctions;
+    std::vector<AttackChainNode> attackChain;
 
     // Detailed Audit & Triage Log
     std::vector<TriageLogEntry> logEntries;
@@ -372,6 +396,40 @@ struct TriageReport {
             }
             json += "      ]\n";
             json += "    }" + std::string(i + 1 < decompiledFunctions.size() ? "," : "") + "\n";
+        }
+        json += "  ],\n";
+        json += "  \"attackChain\": [\n";
+        for (size_t i = 0; i < attackChain.size(); ++i) {
+            const auto& node = attackChain[i];
+            json += "    {\n";
+            json += "      \"id\": \"" + EscapeJson(node.id) + "\",\n";
+            json += "      \"stage\": \"" + EscapeJson(node.stage) + "\",\n";
+            json += "      \"title\": \"" + EscapeJson(node.title) + "\",\n";
+            json += "      \"technique\": \"" + EscapeJson(node.technique) + "\",\n";
+            json += "      \"classification\": \"" + EscapeJson(node.classification) + "\",\n";
+            json += "      \"summary\": \"" + EscapeJson(node.summary) + "\",\n";
+            json += "      \"status\": \"" + EscapeJson(node.status) + "\",\n";
+            json += "      \"rva\": " + std::to_string(node.rva) + ",\n";
+            json += "      \"fileOffset\": " + std::to_string(node.fileOffset) + ",\n";
+            json += "      \"nextNodeIds\": [";
+            for (size_t k = 0; k < node.nextNodeIds.size(); ++k) {
+                json += "\"" + EscapeJson(node.nextNodeIds[k]) + "\"" + (k + 1 < node.nextNodeIds.size() ? ", " : "");
+            }
+            json += "],\n";
+            json += "      \"evidenceList\": [\n";
+            for (size_t j = 0; j < node.evidenceList.size(); ++j) {
+                const auto& ev = node.evidenceList[j];
+                json += "        {\n";
+                json += "          \"type\": \"" + EscapeJson(ev.type) + "\",\n";
+                json += "          \"label\": \"" + EscapeJson(ev.label) + "\",\n";
+                json += "          \"value\": \"" + EscapeJson(ev.value) + "\",\n";
+                json += "          \"rule\": \"" + EscapeJson(ev.rule) + "\",\n";
+                json += "          \"jumpTab\": \"" + EscapeJson(ev.jumpTab) + "\",\n";
+                json += "          \"jumpTarget\": \"" + EscapeJson(ev.jumpTarget) + "\"\n";
+                json += "        }" + std::string(j + 1 < node.evidenceList.size() ? "," : "") + "\n";
+            }
+            json += "      ]\n";
+            json += "    }" + std::string(i + 1 < attackChain.size() ? "," : "") + "\n";
         }
         json += "  ]\n";
         json += "}\n";

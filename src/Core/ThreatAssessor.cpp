@@ -463,6 +463,336 @@ void ThreatAssessor::Assess(const PeReader& pe, TriageReport& report) {
         report.technicalDetails.push_back(std::format("[INFO] Imports verified: {} DLL dependencies loaded.", report.imports.size()));
         report.technicalDetails.push_back("[INFO] No malicious injection chains, exfiltration channels, or defense evasion commands.");
     }
+
+    // ----------------------------------------------------
+    // Construct Verified Attack Chain (Threat Graph)
+    // ----------------------------------------------------
+    report.attackChain.clear();
+
+    // Node 1: Delivery
+    AttackChainNode deliveryNode;
+    deliveryNode.id = "stage-delivery";
+    deliveryNode.stage = "Delivery";
+    deliveryNode.title = "Target Executable Ingestion";
+    deliveryNode.technique = "T1204.002 - User Execution: Malicious File";
+    deliveryNode.classification = report.signature.isValid ? "BENIGN" : "SUSPICIOUS";
+    deliveryNode.summary = "Binary delivered to endpoint with architecture " + report.machineType +
+        " (" + (report.is64Bit ? "x64" : "x86") + "), file size " + FormatFileSize(report.fileSize) + ".";
+    deliveryNode.status = "CONFIRMED";
+    deliveryNode.fileOffset = 0;
+    deliveryNode.rva = report.entryPointRva;
+
+    AttackChainEvidence evCert;
+    evCert.type = "CERT";
+    evCert.label = "Digital Certificate";
+    evCert.value = report.signature.isSigned ? (report.signature.statusText + " (" + report.signature.signerSubject + ")") : "Unsigned binary (No Authenticode certificate)";
+    evCert.rule = "Authenticode Certificate Check";
+    evCert.jumpTab = "overview";
+    evCert.jumpTarget = "signature";
+    deliveryNode.evidenceList.push_back(std::move(evCert));
+
+    if (!report.sha256.empty()) {
+        AttackChainEvidence evHash;
+        evHash.type = "STRING";
+        evHash.label = "SHA-256 Digest";
+        evHash.value = report.sha256;
+        evHash.rule = "Cryptographic Fingerprint";
+        evHash.jumpTab = "overview";
+        evHash.jumpTarget = "hash-sha256";
+        deliveryNode.evidenceList.push_back(std::move(evHash));
+    }
+
+    AttackChainEvidence evEnt;
+    evEnt.type = "ENTROPY";
+    evEnt.label = "Overall Entropy";
+    evEnt.value = std::format("{:.2f} / 8.00", report.overallEntropy);
+    evEnt.rule = "Shannon Lookup Entropy";
+    evEnt.jumpTab = "sections";
+    evEnt.jumpTarget = "sections-heatmap";
+    deliveryNode.evidenceList.push_back(std::move(evEnt));
+
+    report.attackChain.push_back(std::move(deliveryNode));
+
+    // Node 2: Staging (Overlay or Packing)
+    if (report.overlaySize > 0) {
+        AttackChainNode overlayNode;
+        overlayNode.id = "stage-overlay";
+        overlayNode.stage = "Staging";
+        overlayNode.title = "PE Overlay Payload Stager";
+        overlayNode.technique = "T1027.001 - Binary Padding and Overlay";
+        overlayNode.classification = report.hasSuspiciousOverlay ? "CRITICAL" : (report.isInstaller ? "BENIGN" : "SUSPICIOUS");
+        overlayNode.summary = FormatFileSize(report.overlaySize) + " payload container (" +
+            std::format("{:.1f}", report.overlayRatio * 100.0) + "% of file) attached at offset 0x" +
+            std::format("{:X}", report.overlayOffset) + " with entropy " +
+            std::format("{:.2f}", report.overlayEntropy) + "/8.00.";
+        overlayNode.status = "CONFIRMED";
+        overlayNode.fileOffset = report.overlayOffset;
+
+        AttackChainEvidence evOvOff;
+        evOvOff.type = "RVA";
+        evOvOff.label = "Overlay Offset";
+        evOvOff.value = "0x" + std::format("{:X}", report.overlayOffset);
+        evOvOff.rule = "PE Section Boundary Analysis";
+        evOvOff.jumpTab = "sections";
+        evOvOff.jumpTarget = "PE Overlay";
+        overlayNode.evidenceList.push_back(std::move(evOvOff));
+
+        AttackChainEvidence evOvEnt;
+        evOvEnt.type = "ENTROPY";
+        evOvEnt.label = "Overlay Entropy";
+        evOvEnt.value = std::format("{:.2f} / 8.00 ({})", report.overlayEntropy, report.overlayEntropy > 7.2 ? "Encrypted or Compressed" : "Standard");
+        evOvEnt.rule = "Sampled Shannon Entropy";
+        evOvEnt.jumpTab = "sections";
+        evOvEnt.jumpTarget = "stat-overlay";
+        overlayNode.evidenceList.push_back(std::move(evOvEnt));
+
+        AttackChainEvidence evOvCont;
+        evOvCont.type = "CONTAINER";
+        evOvCont.label = "Container Format";
+        evOvCont.value = report.overlayType.empty() ? "Appended Binary Payload" : report.overlayType;
+        evOvCont.rule = "Archive Container Signature Match";
+        evOvCont.jumpTab = "telemetry";
+        evOvCont.jumpTarget = "OVERLAY";
+        overlayNode.evidenceList.push_back(std::move(evOvCont));
+
+        report.attackChain.back().nextNodeIds.push_back(overlayNode.id);
+        report.attackChain.push_back(std::move(overlayNode));
+    } else if (hasPackedCodeSection) {
+        AttackChainNode packedNode;
+        packedNode.id = "stage-packed";
+        packedNode.stage = "Staging";
+        packedNode.title = "Packed Code Section Decompression";
+        packedNode.technique = "T1027.002 - Software Packing";
+        packedNode.classification = "CRITICAL";
+        packedNode.summary = "Executable section '" + packedSectionName + "' exhibits high entropy " +
+            std::format("{:.2f}", maxSectionEntropy) + "/8.00 characteristic of packed or encrypted code.";
+        packedNode.status = "CONFIRMED";
+
+        AttackChainEvidence evSecEnt;
+        evSecEnt.type = "ENTROPY";
+        evSecEnt.label = "Section Entropy";
+        evSecEnt.value = std::format("{:.2f} / 8.00 in {}", maxSectionEntropy, packedSectionName);
+        evSecEnt.rule = "Executable Section Entropy Threshold";
+        evSecEnt.jumpTab = "sections";
+        evSecEnt.jumpTarget = packedSectionName;
+        packedNode.evidenceList.push_back(std::move(evSecEnt));
+
+        report.attackChain.back().nextNodeIds.push_back(packedNode.id);
+        report.attackChain.push_back(std::move(packedNode));
+    }
+
+    // Node 3: Execution (Entry Point)
+    AttackChainNode execNode;
+    execNode.id = "stage-execution";
+    execNode.stage = "Execution";
+    execNode.title = "Application Entry Point Execution";
+    execNode.technique = "T1059 - Command and Scripting Interpreter: Native Binary";
+    execNode.classification = "BENIGN";
+    execNode.summary = "Windows PE loader transfers execution to application entry point at RVA 0x" +
+        std::format("{:X}", report.entryPointRva) + ".";
+    execNode.status = "CONFIRMED";
+    execNode.rva = report.entryPointRva;
+
+    AttackChainEvidence evEntryRva;
+    evEntryRva.type = "RVA";
+    evEntryRva.label = "Entry Point RVA";
+    evEntryRva.value = "0x" + std::format("{:X}", report.entryPointRva);
+    evEntryRva.rule = "PE Optional Header AddressOfEntryPoint";
+    evEntryRva.jumpTab = "decompile";
+    evEntryRva.jumpTarget = "entrypoint_0x" + std::format("{:X}", report.entryPointRva);
+    execNode.evidenceList.push_back(std::move(evEntryRva));
+
+    report.attackChain.back().nextNodeIds.push_back(execNode.id);
+    report.attackChain.push_back(std::move(execNode));
+
+    // Node 4: Defense Evasion (Syscalls, PEB, API Hashing, Commands)
+    if (activeSyscalls > 0 || activePebAccesses > 0 || activeApiHashLoops > 0 || hasEvasionCommands) {
+        AttackChainNode evasionNode;
+        evasionNode.id = "stage-evasion";
+        evasionNode.stage = "Defense Evasion";
+        evasionNode.title = "Direct Syscall and Memory Evasion";
+        evasionNode.technique = "T1562.001 - Impair Defenses: Bypass API Hooks";
+        evasionNode.classification = "CRITICAL";
+        evasionNode.summary = "Dynamic defense evasion primitives discovered in instructions.";
+        evasionNode.status = "CONFIRMED";
+
+        if (activeSyscalls > 0 && !report.syscalls.empty()) {
+            evasionNode.rva = report.syscalls[0].rva;
+            AttackChainEvidence evSys;
+            evSys.type = "DISASM";
+            evSys.label = "Direct Syscall Stub";
+            evSys.value = report.syscalls[0].disassembly + " (SSN 0x" + std::format("{:02X}", report.syscalls[0].ssn) + ")";
+            evSys.rule = "Zydis Direct Syscall Sweeper (0F 05)";
+            evSys.jumpTab = "decompile";
+            evSys.jumpTarget = "fn_SyscallStub";
+            evasionNode.evidenceList.push_back(std::move(evSys));
+        }
+
+        if (activePebAccesses > 0 && !report.pebAccesses.empty()) {
+            if (evasionNode.rva == 0) evasionNode.rva = report.pebAccesses[0].rva;
+            AttackChainEvidence evPeb;
+            evPeb.type = "DISASM";
+            evPeb.label = "Evasive PEB Traversal";
+            evPeb.value = report.pebAccesses[0].disassembly;
+            evPeb.rule = "PEB Module Traversal Pattern";
+            evPeb.jumpTab = "decompile";
+            evPeb.jumpTarget = "fn_PebWalker";
+            evasionNode.evidenceList.push_back(std::move(evPeb));
+        }
+
+        if (activeApiHashLoops > 0 && !report.apiHashLoops.empty()) {
+            if (evasionNode.rva == 0) evasionNode.rva = report.apiHashLoops[0].rva;
+            AttackChainEvidence evHash;
+            evHash.type = "DISASM";
+            evHash.label = "API Hashing Resolution";
+            evHash.value = report.apiHashLoops[0].matchedApi.empty() ? ("Loop algorithm: " + report.apiHashLoops[0].hashAlgorithm) : (report.apiHashLoops[0].matchedApi + " [" + report.apiHashLoops[0].hashAlgorithm + "]");
+            evHash.rule = "Dynamic API Hash Immediate Match";
+            evHash.jumpTab = "decompile";
+            evHash.jumpTarget = "fn_ApiHasher";
+            evasionNode.evidenceList.push_back(std::move(evHash));
+        }
+
+        if (hasEvasionCommands) {
+            AttackChainEvidence evCmd;
+            evCmd.type = "STRING";
+            evCmd.label = "Defense Evasion Command";
+            for (const auto& s : report.sensitiveStrings) {
+                if (s.category == "Defense Evasion") {
+                    evCmd.value = s.matchedPattern;
+                    break;
+                }
+            }
+            evCmd.rule = "Shadow Copy Deletion / Defender Tampering";
+            evCmd.jumpTab = "telemetry";
+            evCmd.jumpTarget = "Defense evasion";
+            evasionNode.evidenceList.push_back(std::move(evCmd));
+        }
+
+        report.attackChain.back().nextNodeIds.push_back(evasionNode.id);
+        report.attackChain.push_back(std::move(evasionNode));
+    }
+
+    // Node 5: Privilege Escalation & Process Injection
+    if (hasInjection) {
+        AttackChainNode injNode;
+        injNode.id = "stage-injection";
+        injNode.stage = "Privilege Escalation";
+        injNode.title = "Cross-Process Memory Injection";
+        injNode.technique = "T1055 - Process Injection";
+        injNode.classification = "CRITICAL";
+        injNode.summary = "Cross-process injection sequence: memory allocation, remote writing, and execution primitives co-located.";
+        injNode.status = "CONFIRMED";
+
+        AttackChainEvidence evChain;
+        evChain.type = "DISASM";
+        evChain.label = "Chained Injection APIs";
+        std::string apisStr;
+        for (size_t i = 0; i < report.injectionChain.chainedApis.size(); ++i) {
+            apisStr += report.injectionChain.chainedApis[i] + (i + 1 < report.injectionChain.chainedApis.size() ? " -> " : "");
+        }
+        evChain.value = apisStr.empty() ? "VirtualAllocEx -> WriteProcessMemory -> CreateRemoteThread" : apisStr;
+        evChain.rule = "Process Injection Chain Heuristic";
+        evChain.jumpTab = "telemetry";
+        evChain.jumpTarget = "INJECTION";
+        injNode.evidenceList.push_back(std::move(evChain));
+
+        if (report.injectionChain.hasRwxProtectArg) {
+            AttackChainEvidence evRwx;
+            evRwx.type = "DISASM";
+            evRwx.label = "RWX Protection Argument";
+            evRwx.value = "PAGE_EXECUTE_READWRITE (0x40)";
+            evRwx.rule = "W^X Memory Protection Violation";
+            evRwx.jumpTab = "telemetry";
+            evRwx.jumpTarget = "PAGE_EXECUTE_READWRITE";
+            injNode.evidenceList.push_back(std::move(evRwx));
+        }
+
+        report.attackChain.back().nextNodeIds.push_back(injNode.id);
+        report.attackChain.push_back(std::move(injNode));
+    }
+
+    // Node 6: Credential Access & Harvesting
+    if (hasCredStealer || hasCryptoTarget) {
+        AttackChainNode credNode;
+        credNode.id = "stage-harvesting";
+        credNode.stage = "Credential Access";
+        credNode.title = "Browser DPAPI and Crypto Wallet Harvesting";
+        credNode.technique = "T1555 - Credentials from Password Stores";
+        credNode.classification = "CRITICAL";
+        credNode.summary = "Hardcoded targeting of web browser credential stores, DPAPI databases, and cryptocurrency wallet extensions.";
+        credNode.status = "CONFIRMED";
+
+        for (const auto& s : report.sensitiveStrings) {
+            if (s.category == "Credential Scraping" || s.category == "Crypto Wallets") {
+                AttackChainEvidence evStr;
+                evStr.type = "STRING";
+                evStr.label = s.category;
+                evStr.value = s.matchedPattern;
+                evStr.rule = "Targeted Credential Database Sweeper";
+                evStr.jumpTab = "telemetry";
+                evStr.jumpTarget = s.matchedPattern;
+                credNode.evidenceList.push_back(std::move(evStr));
+                if (credNode.evidenceList.size() >= 4) break;
+            }
+        }
+
+        report.attackChain.back().nextNodeIds.push_back(credNode.id);
+        report.attackChain.push_back(std::move(credNode));
+    }
+
+    // Node 7: Exfiltration
+    if (hasExfil) {
+        AttackChainNode exfilNode;
+        exfilNode.id = "stage-exfiltration";
+        exfilNode.stage = "Exfiltration";
+        exfilNode.title = "Command and Control Exfiltration Channel";
+        exfilNode.technique = "T1041 - Exfiltration Over C2 Channel";
+        exfilNode.classification = "CRITICAL";
+        exfilNode.summary = "Hardcoded exfiltration endpoints discovered for remote transmission of harvested credentials.";
+        exfilNode.status = "CONFIRMED";
+
+        for (const auto& s : report.sensitiveStrings) {
+            if (s.category == "Exfiltration C2") {
+                AttackChainEvidence evC2;
+                evC2.type = "STRING";
+                evC2.label = "C2 Endpoint";
+                evC2.value = s.matchedPattern;
+                evC2.rule = "Hardcoded C2 Webhook Sweeper";
+                evC2.jumpTab = "telemetry";
+                evC2.jumpTarget = s.matchedPattern;
+                exfilNode.evidenceList.push_back(std::move(evC2));
+                break;
+            }
+        }
+
+        report.attackChain.back().nextNodeIds.push_back(exfilNode.id);
+        report.attackChain.push_back(std::move(exfilNode));
+    }
+
+    // Clean Fallback Nodes for Benign Binaries
+    if (report.threatLevel == ThreatLevel::Clean && report.attackChain.size() <= 2) {
+        AttackChainNode libNode;
+        libNode.id = "stage-library";
+        libNode.stage = "Execution";
+        libNode.title = "Standard Library Import Resolution";
+        libNode.technique = "T1129 - Shared Modules";
+        libNode.classification = "BENIGN";
+        libNode.summary = "Verified dynamic linking against " + std::to_string(report.imports.size()) +
+            " system DLL modules without evasion stubs.";
+        libNode.status = "CONFIRMED";
+
+        AttackChainEvidence evImp;
+        evImp.type = "STRING";
+        evImp.label = "Resolved Modules";
+        evImp.value = std::to_string(report.imports.size()) + " standard libraries linked";
+        evImp.rule = "Import Directory Resolution";
+        evImp.jumpTab = "overview";
+        evImp.jumpTarget = "stat-imports";
+        libNode.evidenceList.push_back(std::move(evImp));
+
+        report.attackChain.back().nextNodeIds.push_back(libNode.id);
+        report.attackChain.push_back(std::move(libNode));
+    }
 }
 
 } // namespace Koltzi

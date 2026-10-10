@@ -52,6 +52,7 @@
                     <button class="btn-glass-pill" data-sample="syscall">Syscalls</button>
                     <button class="btn-glass-pill" data-sample="stealer">Stealer</button>
                     <button class="btn-glass-pill" data-sample="injection">Injection</button>
+                    <button class="btn-glass-pill" data-sample="hades">Hades / Uno</button>
                 </div>
                 <div class="theme-pill-group">
                     <span class="preset-label">Theme</span>
@@ -153,6 +154,7 @@
                         <button class="tab-btn" data-tab="sections">Sections and headers</button>
                         <button class="tab-btn" data-tab="telemetry" id="tab-telemetry-btn">Telemetry log (0)</button>
                         <button class="tab-btn" data-tab="decompile" id="tab-decompile-btn">Decompiler &amp; RE (0)</button>
+                        <button class="tab-btn" data-tab="attack-chain" id="tab-attackchain-btn">Attack chain (0)</button>
                     </div>
                     <div id="quick-metrics-summary" style="font-size: 11px; color: var(--text-dim);">
                         Direct2D/C++ Engine Offline Pass
@@ -372,6 +374,97 @@
                                     </div>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- Tab 5: Attack Chain -->
+                    <div class="tab-pane" id="pane-attack-chain">
+                        <!-- Attack Chain Toolbar -->
+                        <div class="attack-chain-toolbar">
+                            <div class="chain-filters-group">
+                                <span class="chain-toolbar-label">Stage filter</span>
+                                <button class="chain-filter-btn active" data-stage-filter="ALL">All stages</button>
+                                <button class="chain-filter-btn" data-stage-filter="CRITICAL">Critical only</button>
+                                <button class="chain-filter-btn" data-stage-filter="EVASION">Evasion &amp; Staging</button>
+                                <button class="chain-filter-btn" data-stage-filter="EXFIL">Exfiltration</button>
+                            </div>
+
+                            <div class="chain-controls-group">
+                                <span class="tag-pill" id="attack-chain-count-badge">0 forensic nodes</span>
+                                <div class="chain-zoom-controls">
+                                    <button class="btn-glass-icon" id="btn-graph-zoom-in" title="Zoom in">
+                                        <svg width="12" height="12" viewBox="0 0 12 12"><path d="M6 2v8M2 6h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                                    </button>
+                                    <button class="btn-glass-icon" id="btn-graph-zoom-out" title="Zoom out">
+                                        <svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 6h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+                                    </button>
+                                    <button class="btn-glass-pill btn-sm" id="btn-graph-reset" title="Reset scale">100%</button>
+                                    <button class="btn-glass-pill btn-sm" id="btn-graph-fit" title="Fit all nodes to view">Fit view</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Graph Canvas Workspace -->
+                        <div class="attack-chain-stage" id="attack-chain-stage">
+                            <!-- Pan & Zoom Viewport Layer -->
+                            <div class="attack-chain-viewport" id="attack-chain-viewport">
+                                <!-- Dynamic SVG Connector Layer -->
+                                <svg class="attack-chain-svg" id="attack-chain-svg">
+                                    <defs>
+                                        <marker id="arrow-pass" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                                            <path d="M 0 1 L 10 5 L 0 9 z" fill="#10b981" />
+                                        </marker>
+                                        <marker id="arrow-warn" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                                            <path d="M 0 1 L 10 5 L 0 9 z" fill="#f59e0b" />
+                                        </marker>
+                                        <marker id="arrow-threat" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                                            <path d="M 0 1 L 10 5 L 0 9 z" fill="#ef4444" />
+                                        </marker>
+                                    </defs>
+                                    <g id="svg-paths-container"></g>
+                                </svg>
+
+                                <!-- Nodes Placement Layer -->
+                                <div class="attack-chain-nodes-layer" id="attack-chain-nodes-layer">
+                                    <!-- Rendered dynamically by app.js -->
+                                </div>
+                            </div>
+
+                            <!-- Inspect Proof Drawer (Slide-over panel) -->
+                            <aside class="evidence-drawer" id="evidence-drawer" aria-hidden="true">
+                                <div class="evidence-drawer-header">
+                                    <div class="drawer-header-title-block">
+                                        <div class="drawer-header-sup" id="drawer-node-stage">STAGE</div>
+                                        <h3 class="drawer-node-title" id="drawer-node-title">Evidence Inspector</h3>
+                                    </div>
+                                    <div class="drawer-header-actions">
+                                        <span class="finding-pill critical" id="drawer-node-badge">CRITICAL</span>
+                                        <button class="drawer-close-btn" id="btn-close-drawer" title="Close drawer">&times;</button>
+                                    </div>
+                                </div>
+
+                                <div class="evidence-drawer-body">
+                                    <div class="drawer-info-grid">
+                                        <div class="drawer-info-item">
+                                            <span class="drawer-lbl">Technique</span>
+                                            <span class="drawer-val" id="drawer-node-technique">T1055 Process Injection</span>
+                                        </div>
+                                        <div class="drawer-info-item">
+                                            <span class="drawer-lbl">Target address / offset</span>
+                                            <span class="drawer-val mono" id="drawer-node-offsets">RVA 0x00001000 | Offset 0x400</span>
+                                        </div>
+                                    </div>
+
+                                    <div class="drawer-summary-card" id="drawer-node-summary">
+                                        Detailed forensic breakdown will appear here.
+                                    </div>
+
+                                    <div class="drawer-section-heading">Hard Forensic Evidence Records</div>
+                                    <div class="drawer-evidence-list" id="drawer-evidence-list">
+                                        <!-- Evidence items populated here -->
+                                    </div>
+                                </div>
+                            </aside>
                         </div>
                     </div>
                 </div>
