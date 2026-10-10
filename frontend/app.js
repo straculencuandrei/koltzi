@@ -220,22 +220,156 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
     }, false);
 
-    // 7. Theme Switching Engine
-    const themeBtns = document.querySelectorAll('[data-theme-btn]');
-    function applyTheme(themeName) {
-        document.body.setAttribute('data-theme', themeName);
-        themeBtns.forEach(b => {
-            if (b.getAttribute('data-theme-btn') === themeName) {
-                b.classList.add('active');
-            } else {
-                b.classList.remove('active');
-            }
-        });
-        ghost.setTheme(themeName);
+    // 7. Synthesized Web Audio Cues (Zero External Media Files)
+    let audioCtx = null;
+    function playChime(type) {
+        if (!currentSettings.soundEnabled) return;
         try {
-            localStorage.setItem('koltzi_theme', themeName);
+            const AudioCtx = window.AudioContext || window.webkitAudioContext;
+            if (!AudioCtx) return;
+            if (!audioCtx) audioCtx = new AudioCtx();
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+            const vol = (currentSettings.soundVolume || 30) / 100 * 0.35;
+            const now = audioCtx.currentTime;
+
+            if (type === 'clean') {
+                // Harmonic triad: C5 (523Hz) -> E5 (659Hz) -> G5 (784Hz) -> C6 (1046Hz)
+                [523.25, 659.25, 783.99, 1046.5].forEach((freq, idx) => {
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(freq, now + idx * 0.07);
+                    gain.gain.setValueAtTime(0, now + idx * 0.07);
+                    gain.gain.linearRampToValueAtTime(vol * 0.5, now + idx * 0.07 + 0.02);
+                    gain.gain.exponentialRampToValueAtTime(0.0001, now + idx * 0.07 + 0.45);
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.start(now + idx * 0.07);
+                    osc.stop(now + idx * 0.07 + 0.5);
+                });
+            } else if (type === 'suspicious') {
+                // Warm dual-tone warning: A4 (440Hz) -> C#5 (554Hz)
+                [440, 554.37].forEach((freq, idx) => {
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(freq, now + idx * 0.1);
+                    gain.gain.setValueAtTime(0, now + idx * 0.1);
+                    gain.gain.linearRampToValueAtTime(vol * 0.6, now + idx * 0.1 + 0.02);
+                    gain.gain.exponentialRampToValueAtTime(0.0001, now + idx * 0.1 + 0.35);
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.start(now + idx * 0.1);
+                    osc.stop(now + idx * 0.1 + 0.4);
+                });
+            } else if (type === 'malware') {
+                // Tense dissonant alarm chord: A3 (220Hz) + Bb3 (233Hz) + E4 (329Hz)
+                [220, 233.08, 329.63].forEach((freq) => {
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.type = 'sawtooth';
+                    osc.frequency.setValueAtTime(freq, now);
+                    gain.gain.setValueAtTime(0, now);
+                    gain.gain.linearRampToValueAtTime(vol * 0.4, now + 0.03);
+                    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.55);
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.start(now);
+                    osc.stop(now + 0.6);
+                });
+            }
         } catch (e) {}
     }
+
+    // 8. Settings & Dynamic Reactive Theme Engine
+    const defaultSettings = {
+        themeMode: 'dynamic', // 'dynamic' or 'static'
+        staticTheme: 'ember', // 'clean', 'ember', 'malware', 'midnight', 'twilight', 'black', 'light'
+        transitionSpeed: 600,
+        ambientBlobs: true,
+        ghostEnabled: true,
+        ghostParticles: true,
+        ghostTracking: true,
+        soundEnabled: true,
+        soundVolume: 30,
+        entropyThreshold: 7.20,
+        authenticodeDiscount: true,
+        disasmDepth: 500,
+        landingTab: 'overview',
+        autoCopyHash: false,
+        reducedMotion: false,
+        fontScale: 'normal'
+    };
+
+    let currentSettings = { ...defaultSettings };
+
+    try {
+        const savedRaw = localStorage.getItem('koltzi_settings');
+        if (savedRaw) {
+            currentSettings = Object.assign({}, defaultSettings, JSON.parse(savedRaw));
+        }
+    } catch (e) {}
+
+    function saveSettings() {
+        try {
+            localStorage.setItem('koltzi_settings', JSON.stringify(currentSettings));
+        } catch (e) {}
+    }
+
+    const themeBtns = document.querySelectorAll('[data-theme-btn]');
+
+    function getDynamicThemeForMood(mood) {
+        if (mood === 'happy') return 'clean';
+        if (mood === 'alarmed') return 'malware';
+        if (mood === 'puzzled') return 'ember';
+        if (mood === 'sniffing') return 'ember';
+        return 'ember';
+    }
+
+    function applyTheme(targetTheme, isDynamicVerdict = false) {
+        let effectiveTheme = targetTheme;
+
+        if (targetTheme === 'dynamic') {
+            currentSettings.themeMode = 'dynamic';
+            saveSettings();
+            effectiveTheme = getDynamicThemeForMood(ghost.mood);
+        } else if (isDynamicVerdict) {
+            if (currentSettings.themeMode !== 'dynamic') {
+                return;
+            }
+            effectiveTheme = targetTheme;
+        } else {
+            currentSettings.themeMode = 'static';
+            currentSettings.staticTheme = targetTheme;
+            saveSettings();
+            effectiveTheme = targetTheme;
+        }
+
+        document.body.setAttribute('data-theme', effectiveTheme);
+        ghost.setTheme(effectiveTheme);
+
+        themeBtns.forEach(btn => {
+            const btnTheme = btn.getAttribute('data-theme-btn');
+            if (currentSettings.themeMode === 'dynamic') {
+                if (btnTheme === 'dynamic') btn.classList.add('active');
+                else btn.classList.remove('active');
+            } else {
+                if (btnTheme === currentSettings.staticTheme) btn.classList.add('active');
+                else btn.classList.remove('active');
+            }
+        });
+
+        syncSettingsUI();
+    }
+
+    ghost.onMoodChange = (newMood) => {
+        if (currentSettings.themeMode === 'dynamic') {
+            const dynTheme = getDynamicThemeForMood(newMood);
+            applyTheme(dynTheme, true);
+        }
+    };
 
     themeBtns.forEach(btn => {
         btn.addEventListener('click', () => {
@@ -244,13 +378,364 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    // Restore saved theme or default to ember
-    try {
-        const savedTheme = localStorage.getItem('koltzi_theme') || 'ember';
-        applyTheme(savedTheme);
-    } catch (e) {
-        applyTheme('ember');
+    function applyAllSettingsToDOM() {
+        document.documentElement.style.setProperty('--theme-transition-duration', (currentSettings.transitionSpeed / 1000) + 's');
+
+        const blobsLayer = document.querySelector('.ambient-blobs-layer');
+        if (blobsLayer) blobsLayer.classList.toggle('blobs-disabled', !currentSettings.ambientBlobs);
+
+        ghost.enabled = currentSettings.ghostEnabled;
+        const ghostCard = document.querySelector('.ghost-companion-card');
+        if (ghostCard) ghostCard.style.display = currentSettings.ghostEnabled ? 'flex' : 'none';
+
+        ghost.particlesEnabled = currentSettings.ghostParticles;
+        ghost.trackingEnabled = currentSettings.ghostTracking;
+        ghost.reducedMotion = currentSettings.reducedMotion;
+
+        document.body.classList.toggle('reduced-motion', currentSettings.reducedMotion);
+
+        document.body.classList.remove('scale-compact', 'scale-comfort');
+        if (currentSettings.fontScale === 'compact') document.body.classList.add('scale-compact');
+        else if (currentSettings.fontScale === 'comfort') document.body.classList.add('scale-comfort');
     }
+
+    function syncSettingsUI() {
+        // Theme mode segmented buttons
+        const modeBtns = document.querySelectorAll('#ctrl-theme-mode .seg-btn');
+        modeBtns.forEach(b => {
+            const mode = b.getAttribute('data-mode');
+            b.classList.toggle('active', mode === currentSettings.themeMode);
+        });
+
+        // Static theme picker grid
+        const themeCards = document.querySelectorAll('#theme-picker-grid .theme-card-option');
+        themeCards.forEach(tc => {
+            const val = tc.getAttribute('data-theme-val');
+            tc.classList.toggle('active', val === currentSettings.staticTheme);
+        });
+
+        // Sliders & inputs
+        const slTrans = document.getElementById('slider-transition-speed');
+        const valTrans = document.getElementById('val-transition-speed');
+        if (slTrans && valTrans) {
+            slTrans.value = currentSettings.transitionSpeed;
+            valTrans.textContent = `${(currentSettings.transitionSpeed / 1000).toFixed(1)}s`;
+        }
+
+        const tBlobs = document.getElementById('toggle-ambient-blobs');
+        if (tBlobs) tBlobs.checked = currentSettings.ambientBlobs;
+
+        const tGhost = document.getElementById('toggle-ghost-enabled');
+        if (tGhost) tGhost.checked = currentSettings.ghostEnabled;
+
+        const tParts = document.getElementById('toggle-ghost-particles');
+        if (tParts) tParts.checked = currentSettings.ghostParticles;
+
+        const tTrack = document.getElementById('toggle-ghost-tracking');
+        if (tTrack) tTrack.checked = currentSettings.ghostTracking;
+
+        const tSound = document.getElementById('toggle-sound-enabled');
+        if (tSound) tSound.checked = currentSettings.soundEnabled;
+
+        const slVol = document.getElementById('slider-sound-vol');
+        const valVol = document.getElementById('val-sound-vol');
+        if (slVol && valVol) {
+            slVol.value = currentSettings.soundVolume;
+            valVol.textContent = `${currentSettings.soundVolume}%`;
+        }
+
+        const slEnt = document.getElementById('slider-entropy-threshold');
+        const valEnt = document.getElementById('val-entropy-threshold');
+        if (slEnt && valEnt) {
+            slEnt.value = currentSettings.entropyThreshold;
+            valEnt.textContent = `${parseFloat(currentSettings.entropyThreshold).toFixed(2)} bits/byte`;
+        }
+
+        const tAuth = document.getElementById('toggle-authenticode-discount');
+        if (tAuth) tAuth.checked = currentSettings.authenticodeDiscount;
+
+        const depthBtns = document.querySelectorAll('#ctrl-disasm-depth .seg-btn');
+        depthBtns.forEach(b => {
+            const depth = parseInt(b.getAttribute('data-depth'), 10);
+            b.classList.toggle('active', depth === currentSettings.disasmDepth);
+        });
+
+        const selTab = document.getElementById('select-landing-tab');
+        if (selTab) selTab.value = currentSettings.landingTab;
+
+        const tHash = document.getElementById('toggle-auto-copy-hash');
+        if (tHash) tHash.checked = currentSettings.autoCopyHash;
+
+        const tMotion = document.getElementById('toggle-reduced-motion');
+        if (tMotion) tMotion.checked = currentSettings.reducedMotion;
+
+        const fontBtns = document.querySelectorAll('#ctrl-font-scale .seg-btn');
+        fontBtns.forEach(b => {
+            const sc = b.getAttribute('data-scale');
+            b.classList.toggle('active', sc === currentSettings.fontScale);
+        });
+
+        applyAllSettingsToDOM();
+    }
+
+    function initSettingsListeners() {
+        // Mode toggle
+        document.querySelectorAll('#ctrl-theme-mode .seg-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const mode = btn.getAttribute('data-mode');
+                if (mode === 'dynamic') {
+                    applyTheme('dynamic');
+                } else {
+                    applyTheme(currentSettings.staticTheme);
+                }
+            });
+        });
+
+        // Live preview buttons
+        const btnPrevClean = document.getElementById('btn-preview-clean');
+        if (btnPrevClean) {
+            btnPrevClean.addEventListener('click', () => {
+                ghost.setMood('happy');
+                ghost.setDialogue('Clean verdict preview. Emerald and obsidian black theme active.', false);
+                applyTheme('clean', true);
+                playChime('clean');
+            });
+        }
+        const btnPrevEmber = document.getElementById('btn-preview-ember');
+        if (btnPrevEmber) {
+            btnPrevEmber.addEventListener('click', () => {
+                ghost.setMood('puzzled');
+                ghost.setDialogue('Suspicious verdict preview. Warm amber and charcoal black theme active.', false);
+                applyTheme('ember', true);
+                playChime('suspicious');
+            });
+        }
+        const btnPrevMalware = document.getElementById('btn-preview-malware');
+        if (btnPrevMalware) {
+            btnPrevMalware.addEventListener('click', () => {
+                ghost.setMood('alarmed');
+                ghost.setDialogue('Critical malware threat preview. Crimson blood red and abyss black theme active.', false);
+                applyTheme('malware', true);
+                playChime('malware');
+            });
+        }
+
+        // Static theme picker grid
+        document.querySelectorAll('#theme-picker-grid .theme-card-option').forEach(card => {
+            card.addEventListener('click', () => {
+                const themeVal = card.getAttribute('data-theme-val');
+                applyTheme(themeVal);
+            });
+        });
+
+        // Transition slider
+        const slTrans = document.getElementById('slider-transition-speed');
+        if (slTrans) {
+            slTrans.addEventListener('input', (e) => {
+                currentSettings.transitionSpeed = parseInt(e.target.value, 10);
+                saveSettings();
+                syncSettingsUI();
+            });
+        }
+
+        // Ambient blobs toggle
+        const tBlobs = document.getElementById('toggle-ambient-blobs');
+        if (tBlobs) {
+            tBlobs.addEventListener('change', (e) => {
+                currentSettings.ambientBlobs = e.target.checked;
+                saveSettings();
+                syncSettingsUI();
+            });
+        }
+
+        // Ghost mascot toggle
+        const tGhost = document.getElementById('toggle-ghost-enabled');
+        if (tGhost) {
+            tGhost.addEventListener('change', (e) => {
+                currentSettings.ghostEnabled = e.target.checked;
+                saveSettings();
+                syncSettingsUI();
+            });
+        }
+
+        // Ghost particles
+        const tParts = document.getElementById('toggle-ghost-particles');
+        if (tParts) {
+            tParts.addEventListener('change', (e) => {
+                currentSettings.ghostParticles = e.target.checked;
+                saveSettings();
+                syncSettingsUI();
+            });
+        }
+
+        // Ghost tracking
+        const tTrack = document.getElementById('toggle-ghost-tracking');
+        if (tTrack) {
+            tTrack.addEventListener('change', (e) => {
+                currentSettings.ghostTracking = e.target.checked;
+                saveSettings();
+                syncSettingsUI();
+            });
+        }
+
+        // Sound toggle & volume
+        const tSound = document.getElementById('toggle-sound-enabled');
+        if (tSound) {
+            tSound.addEventListener('change', (e) => {
+                currentSettings.soundEnabled = e.target.checked;
+                saveSettings();
+                syncSettingsUI();
+            });
+        }
+
+        const slVol = document.getElementById('slider-sound-vol');
+        if (slVol) {
+            slVol.addEventListener('input', (e) => {
+                currentSettings.soundVolume = parseInt(e.target.value, 10);
+                saveSettings();
+                syncSettingsUI();
+            });
+        }
+
+        // Sound test buttons
+        const btnChimeClean = document.getElementById('btn-test-chime-clean');
+        if (btnChimeClean) btnChimeClean.addEventListener('click', () => playChime('clean'));
+        const btnChimeSusp = document.getElementById('btn-test-chime-suspicious');
+        if (btnChimeSusp) btnChimeSusp.addEventListener('click', () => playChime('suspicious'));
+        const btnChimeMalw = document.getElementById('btn-test-chime-malware');
+        if (btnChimeMalw) btnChimeMalw.addEventListener('click', () => playChime('malware'));
+
+        // Entropy threshold
+        const slEnt = document.getElementById('slider-entropy-threshold');
+        if (slEnt) {
+            slEnt.addEventListener('input', (e) => {
+                currentSettings.entropyThreshold = parseFloat(e.target.value);
+                saveSettings();
+                syncSettingsUI();
+            });
+        }
+
+        // Authenticode toggle
+        const tAuth = document.getElementById('toggle-authenticode-discount');
+        if (tAuth) {
+            tAuth.addEventListener('change', (e) => {
+                currentSettings.authenticodeDiscount = e.target.checked;
+                saveSettings();
+                syncSettingsUI();
+            });
+        }
+
+        // Disasm depth
+        document.querySelectorAll('#ctrl-disasm-depth .seg-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                currentSettings.disasmDepth = parseInt(btn.getAttribute('data-depth'), 10);
+                saveSettings();
+                syncSettingsUI();
+            });
+        });
+
+        // Landing tab select
+        const selTab = document.getElementById('select-landing-tab');
+        if (selTab) {
+            selTab.addEventListener('change', (e) => {
+                currentSettings.landingTab = e.target.value;
+                saveSettings();
+                syncSettingsUI();
+            });
+        }
+
+        // Auto copy hash
+        const tHash = document.getElementById('toggle-auto-copy-hash');
+        if (tHash) {
+            tHash.addEventListener('change', (e) => {
+                currentSettings.autoCopyHash = e.target.checked;
+                saveSettings();
+                syncSettingsUI();
+            });
+        }
+
+        // Reduced motion
+        const tMotion = document.getElementById('toggle-reduced-motion');
+        if (tMotion) {
+            tMotion.addEventListener('change', (e) => {
+                currentSettings.reducedMotion = e.target.checked;
+                saveSettings();
+                syncSettingsUI();
+            });
+        }
+
+        // Font scale
+        document.querySelectorAll('#ctrl-font-scale .seg-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                currentSettings.fontScale = btn.getAttribute('data-scale');
+                saveSettings();
+                syncSettingsUI();
+            });
+        });
+
+        // Export JSON
+        const btnExport = document.getElementById('btn-settings-export');
+        if (btnExport) {
+            btnExport.addEventListener('click', () => {
+                const blob = new Blob([JSON.stringify(currentSettings, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'koltzi-workbench-settings.json';
+                a.click();
+                URL.revokeObjectURL(url);
+            });
+        }
+
+        // Import JSON
+        const btnImport = document.getElementById('btn-settings-import');
+        const fileInput = document.getElementById('settings-file-input');
+        if (btnImport && fileInput) {
+            btnImport.addEventListener('click', () => fileInput.click());
+            fileInput.addEventListener('change', (e) => {
+                if (e.target.files && e.target.files[0]) {
+                    const reader = new FileReader();
+                    reader.onload = (evt) => {
+                        try {
+                            const parsed = JSON.parse(evt.target.result);
+                            currentSettings = Object.assign({}, defaultSettings, parsed);
+                            saveSettings();
+                            if (currentSettings.themeMode === 'dynamic') {
+                                applyTheme('dynamic');
+                            } else {
+                                applyTheme(currentSettings.staticTheme);
+                            }
+                            syncSettingsUI();
+                        } catch (err) {
+                            alert('Invalid settings JSON format.');
+                        }
+                    };
+                    reader.readAsText(e.target.files[0]);
+                }
+            });
+        }
+
+        // Reset Defaults
+        const btnReset = document.getElementById('btn-settings-reset');
+        if (btnReset) {
+            btnReset.addEventListener('click', () => {
+                currentSettings = { ...defaultSettings };
+                saveSettings();
+                applyTheme('dynamic');
+                syncSettingsUI();
+            });
+        }
+    }
+
+    initSettingsListeners();
+
+    // Initial Theme and Settings Application
+    if (currentSettings.themeMode === 'dynamic') {
+        applyTheme('dynamic');
+    } else {
+        applyTheme(currentSettings.staticTheme || 'ember');
+    }
+    syncSettingsUI();
 
     async function analyzeFile(filePath) {
         sampleBtns.forEach(b => b.classList.remove('active'));
@@ -297,9 +782,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // 9. Render Engine Report to UI
+    window.renderReport = renderReport;
+    window.applyTheme = applyTheme;
     function renderReport(report) {
         if (!report) return;
         currentReport = report;
+
 
         // Titlebar & Header
         document.getElementById('active-target-title').textContent = report.fileName || 'Unknown Binary';
@@ -349,6 +837,39 @@ document.addEventListener('DOMContentLoaded', () => {
         ghost.setMood(ghostMood);
         if (report.personalityDialogue) {
             ghost.setDialogue(report.personalityDialogue, false);
+        }
+
+        // Live Reactive Theme & Auditory Cues based on ghost verdict
+        if (currentSettings.themeMode === 'dynamic') {
+            if (score >= 60 || ghostMood === 'alarmed') {
+                applyTheme('malware', true);
+                playChime('malware');
+            } else if (score >= 20 || ghostMood === 'puzzled' || (report.overallEntropy && report.overallEntropy > (currentSettings.entropyThreshold || 7.2))) {
+                applyTheme('ember', true);
+                playChime('suspicious');
+            } else {
+                applyTheme('clean', true);
+                playChime('clean');
+            }
+        } else {
+            if (score >= 60) playChime('malware');
+            else if (score >= 20) playChime('suspicious');
+            else playChime('clean');
+        }
+
+        // Automated Hash Copy to Windows Clipboard
+        if (currentSettings.autoCopyHash && report.sha256) {
+            try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(report.sha256).catch(() => {});
+                }
+            } catch (e) {}
+        }
+
+        // Landed Tab Auto-Navigation if configured
+        if (currentSettings.landingTab && currentSettings.landingTab !== 'overview') {
+            const targetTabBtn = document.querySelector(`.tab-btn[data-tab="${currentSettings.landingTab}"]`);
+            if (targetTabBtn) targetTabBtn.click();
         }
 
         // Telemetry Summary

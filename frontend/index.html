@@ -72,13 +72,22 @@
                 </div>
                 <div class="theme-pill-group">
                     <span class="preset-label">Theme</span>
-                    <button class="btn-theme-pill active" data-theme-btn="ember" title="Warm Amber and Charcoal">
+                    <button class="btn-theme-pill active" data-theme-btn="dynamic" title="Dynamic Live Ghost &amp; Threat Verdict Adaptive Theme">
+                        <span class="theme-dot dynamic-pulse-dot"></span> Live
+                    </button>
+                    <button class="btn-theme-pill" data-theme-btn="clean" title="Emerald Clean &amp; Obsidian Black">
+                        <span class="theme-dot" style="background: #10b981;"></span> Clean
+                    </button>
+                    <button class="btn-theme-pill" data-theme-btn="ember" title="Warm Ember &amp; Charcoal Black">
                         <span class="theme-dot" style="background: #f59e0b;"></span> Ember
                     </button>
-                    <button class="btn-theme-pill" data-theme-btn="midnight" title="Midnight Slate and Petrol Navy">
+                    <button class="btn-theme-pill" data-theme-btn="malware" title="Crimson Alert &amp; Abyss Black">
+                        <span class="theme-dot" style="background: #ef4444;"></span> Malware
+                    </button>
+                    <button class="btn-theme-pill" data-theme-btn="midnight" title="Midnight Slate &amp; Petrol Navy">
                         <span class="theme-dot" style="background: #38bdf8;"></span> Midnight
                     </button>
-                    <button class="btn-theme-pill" data-theme-btn="twilight" title="Twilight Violet and Royal Velvet">
+                    <button class="btn-theme-pill" data-theme-btn="twilight" title="Twilight Violet &amp; Royal Velvet">
                         <span class="theme-dot" style="background: #a78bfa;"></span> Twilight
                     </button>
                     <button class="btn-theme-pill" data-theme-btn="black" title="OLED Pure Black with High Contrast Outlines">
@@ -178,6 +187,7 @@
                         <button class="tab-btn" data-tab="decompile" id="tab-decompile-btn">Decompiler &amp; RE (0)</button>
                         <button class="tab-btn" data-tab="attack-chain" id="tab-attackchain-btn">Attack chain (0)</button>
                         <button class="tab-btn" data-tab="wiki" id="tab-wiki-btn">RE Knowledge Base</button>
+                        <button class="tab-btn" data-tab="settings" id="tab-settings-btn">Settings</button>
                     </div>
                 </div>
 
@@ -784,6 +794,379 @@
                             </div>
                         </div>
                     </div>
+
+                    <!-- Tab 7: Settings & Workbench Preferences -->
+                    <div class="tab-pane" id="pane-settings">
+                        <div class="settings-container">
+                            <!-- Settings Header Banner -->
+                            <div class="settings-header-card">
+                                <div class="settings-header-left">
+                                    <div class="settings-header-icon-wrap">
+                                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <circle cx="12" cy="12" r="3"></circle>
+                                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <h2 class="settings-header-title">Workbench Settings &amp; Life Helpers</h2>
+                                        <p class="settings-header-sub">Configure dynamic threat-reactive themes, mascot behaviors, forensic thresholds, and accessibility options.</p>
+                                    </div>
+                                </div>
+                                <div class="settings-header-actions">
+                                    <button class="btn-glass-pill" id="btn-settings-export" title="Export settings configuration to JSON">Export JSON</button>
+                                    <button class="btn-glass-pill" id="btn-settings-import" title="Import settings configuration from JSON">Import JSON</button>
+                                    <input type="file" id="settings-file-input" accept=".json" style="display: none;">
+                                    <button class="btn-glass-pill text-threat" id="btn-settings-reset" title="Reset all configuration back to factory defaults">Reset Defaults</button>
+                                </div>
+                            </div>
+
+                            <div class="settings-grid">
+                                <!-- Card 1: Theme & Visual Appearance -->
+                                <div class="settings-section-card">
+                                    <div class="settings-section-header">
+                                        <span class="settings-section-badge">Visual Engine</span>
+                                        <h3 class="settings-section-title">Reactive &amp; Static Themes</h3>
+                                        <p class="settings-section-desc">Choose between real-time threat-reactive themes that dynamically cross-fade based on the Ghost companion's verdict, or a locked static palette.</p>
+                                    </div>
+
+                                    <!-- Theme Mode Radio Toggle -->
+                                    <div class="settings-row">
+                                        <div class="settings-label-col">
+                                            <span class="settings-item-title">Theme Operation Mode</span>
+                                            <span class="settings-item-desc">Dynamic reactive adapts live to Clean (Green), Suspicious (Ember), and Malware (Red).</span>
+                                        </div>
+                                        <div class="settings-control-col">
+                                            <div class="segmented-control" id="ctrl-theme-mode">
+                                                <button class="seg-btn active" data-mode="dynamic">Dynamic Live (Ghost Reactive)</button>
+                                                <button class="seg-btn" data-mode="static">Static Manual</button>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Dynamic Live Preview Strip -->
+                                    <div class="dynamic-preview-strip" id="dynamic-preview-box">
+                                        <div class="dynamic-preview-header">
+                                            <span class="dynamic-badge"><span class="dynamic-pulse-dot"></span> LIVE REACTIVE PREVIEW</span>
+                                            <span style="font-size: 11px; color: var(--text-dim);">Click to preview live morph</span>
+                                        </div>
+                                        <div class="dynamic-preview-buttons">
+                                            <button class="btn-theme-preview clean" id="btn-preview-clean" title="Preview Clean emerald green and black theme">
+                                                <span class="theme-preview-dot" style="background: #10b981;"></span>
+                                                <span class="theme-preview-text">
+                                                    <strong>Clean / Safe</strong>
+                                                    <small>Emerald Green + Black</small>
+                                                </span>
+                                            </button>
+                                            <button class="btn-theme-preview ember" id="btn-preview-ember" title="Preview Suspicious amber and charcoal theme">
+                                                <span class="theme-preview-dot" style="background: #f59e0b;"></span>
+                                                <span class="theme-preview-text">
+                                                    <strong>Suspicious</strong>
+                                                    <small>Warm Ember + Charcoal</small>
+                                                </span>
+                                            </button>
+                                            <button class="btn-theme-preview malware" id="btn-preview-malware" title="Preview Malware crimson red and abyss black theme">
+                                                <span class="theme-preview-dot" style="background: #ef4444;"></span>
+                                                <span class="theme-preview-text">
+                                                    <strong>Malware Threat</strong>
+                                                    <small>Crimson Red + Abyss</small>
+                                                </span>
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <!-- Static Palette Grid -->
+                                    <div class="settings-row" id="static-palettes-row">
+                                        <div class="settings-label-col">
+                                            <span class="settings-item-title">Static Theme Palette</span>
+                                            <span class="settings-item-desc">Select permanent theme when static mode is active.</span>
+                                        </div>
+                                        <div class="settings-control-col">
+                                            <div class="theme-picker-grid" id="theme-picker-grid">
+                                                <div class="theme-card-option" data-theme-val="clean">
+                                                    <div class="theme-swatch-circle" style="background: linear-gradient(135deg, #10b981 0%, #050d08 100%); border-color: #10b981;"></div>
+                                                    <span class="theme-card-name">Clean Green</span>
+                                                </div>
+                                                <div class="theme-card-option active" data-theme-val="ember">
+                                                    <div class="theme-swatch-circle" style="background: linear-gradient(135deg, #f59e0b 0%, #100d0a 100%); border-color: #f59e0b;"></div>
+                                                    <span class="theme-card-name">Warm Ember</span>
+                                                </div>
+                                                <div class="theme-card-option" data-theme-val="malware">
+                                                    <div class="theme-swatch-circle" style="background: linear-gradient(135deg, #ef4444 0%, #0c0405 100%); border-color: #ef4444;"></div>
+                                                    <span class="theme-card-name">Crimson Red</span>
+                                                </div>
+                                                <div class="theme-card-option" data-theme-val="midnight">
+                                                    <div class="theme-swatch-circle" style="background: linear-gradient(135deg, #38bdf8 0%, #020508 100%); border-color: #38bdf8;"></div>
+                                                    <span class="theme-card-name">Midnight Slate</span>
+                                                </div>
+                                                <div class="theme-card-option" data-theme-val="twilight">
+                                                    <div class="theme-swatch-circle" style="background: linear-gradient(135deg, #a78bfa 0%, #110d24 100%); border-color: #a78bfa;"></div>
+                                                    <span class="theme-card-name">Twilight Violet</span>
+                                                </div>
+                                                <div class="theme-card-option" data-theme-val="black">
+                                                    <div class="theme-swatch-circle" style="background: #000000; border-color: #ffffff;"></div>
+                                                    <span class="theme-card-name">OLED Black</span>
+                                                </div>
+                                                <div class="theme-card-option" data-theme-val="light">
+                                                    <div class="theme-swatch-circle" style="background: linear-gradient(135deg, #ffffff 0%, #2563eb 100%); border-color: #2563eb;"></div>
+                                                    <span class="theme-card-name">Alabaster White</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Theme Transition Speed Slider -->
+                                    <div class="settings-row">
+                                        <div class="settings-label-col">
+                                            <span class="settings-item-title">Cross-Fade Transition Duration</span>
+                                            <span class="settings-item-desc">Controls how smoothly themes morph and fade between states.</span>
+                                        </div>
+                                        <div class="settings-control-col">
+                                            <div class="slider-with-val">
+                                                <input type="range" class="glass-slider" id="slider-transition-speed" min="0" max="1000" step="100" value="600">
+                                                <span class="slider-val-badge" id="val-transition-speed">0.6s (Cinematic)</span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Ambient Radiant Blobs & Glassmorphism Glow -->
+                                    <div class="settings-row">
+                                        <div class="settings-label-col">
+                                            <span class="settings-item-title">Ambient Radiant Glow Blobs</span>
+                                            <span class="settings-item-desc">Enable smooth floating radiant light orbs beneath glass panels.</span>
+                                        </div>
+                                        <div class="settings-control-col">
+                                            <label class="switch">
+                                                <input type="checkbox" id="toggle-ambient-blobs" checked>
+                                                <span class="slider round"></span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Card 2: Ghost Mascot & Auditory Signals -->
+                                <div class="settings-section-card">
+                                    <div class="settings-section-header">
+                                        <span class="settings-section-badge">Companion Engine</span>
+                                        <h3 class="settings-section-title">Ghost Mascot &amp; Sound Feedback</h3>
+                                        <p class="settings-section-desc">Personalize the living procedural ghost companion animation physics, speech bubble dialogue, and audio synthesis cues.</p>
+                                    </div>
+
+                                    <!-- Ghost Mascot Toggle -->
+                                    <div class="settings-row">
+                                        <div class="settings-label-col">
+                                            <span class="settings-item-title">Mascot Display</span>
+                                            <span class="settings-item-desc">Show the animated companion mascot in the executive triage card.</span>
+                                        </div>
+                                        <div class="settings-control-col">
+                                            <label class="switch">
+                                                <input type="checkbox" id="toggle-ghost-enabled" checked>
+                                                <span class="slider round"></span>
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <!-- Ghost Particles -->
+                                    <div class="settings-row">
+                                        <div class="settings-label-col">
+                                            <span class="settings-item-title">Ambient Starlight Particles</span>
+                                            <span class="settings-item-desc">Rising luminous particles orbiting the ghost body.</span>
+                                        </div>
+                                        <div class="settings-control-col">
+                                            <label class="switch">
+                                                <input type="checkbox" id="toggle-ghost-particles" checked>
+                                                <span class="slider round"></span>
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <!-- Ghost Eye Mouse Tracking -->
+                                    <div class="settings-row">
+                                        <div class="settings-label-col">
+                                            <span class="settings-item-title">Cursor Tracking Eyes</span>
+                                            <span class="settings-item-desc">Pupils smoothly track your mouse cursor across the screen.</span>
+                                        </div>
+                                        <div class="settings-control-col">
+                                            <label class="switch">
+                                                <input type="checkbox" id="toggle-ghost-tracking" checked>
+                                                <span class="slider round"></span>
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <!-- Synthesized Web Audio Cues -->
+                                    <div class="settings-row">
+                                        <div class="settings-label-col">
+                                            <span class="settings-item-title">Synthesized Audio Cues</span>
+                                            <span class="settings-item-desc">Pure offline Web Audio chimes for scan results and alerts. Zero external media files.</span>
+                                        </div>
+                                        <div class="settings-control-col">
+                                            <label class="switch">
+                                                <input type="checkbox" id="toggle-sound-enabled" checked>
+                                                <span class="slider round"></span>
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <!-- Sound Volume & Audio Test -->
+                                    <div class="settings-row" id="sound-controls-row">
+                                        <div class="settings-label-col">
+                                            <span class="settings-item-title">Audio Volume &amp; Preview</span>
+                                            <span class="settings-item-desc">Adjust synthesized volume and test tone frequencies.</span>
+                                        </div>
+                                        <div class="settings-control-col">
+                                            <div class="sound-test-container">
+                                                <div class="slider-with-val">
+                                                    <input type="range" class="glass-slider" id="slider-sound-vol" min="5" max="100" step="5" value="30">
+                                                    <span class="slider-val-badge" id="val-sound-vol">30%</span>
+                                                </div>
+                                                <div class="sound-btn-row">
+                                                    <button class="btn-sound-test" id="btn-test-chime-clean">Harmonic Chime</button>
+                                                    <button class="btn-sound-test" id="btn-test-chime-suspicious">Warning Pip</button>
+                                                    <button class="btn-sound-test" id="btn-test-chime-malware">Threat Chord</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Card 3: Analysis & Heuristic Engine Preferences -->
+                                <div class="settings-section-card">
+                                    <div class="settings-section-header">
+                                        <span class="settings-section-badge">Forensic Core</span>
+                                        <h3 class="settings-section-title">Static Triage &amp; Analysis Tuning</h3>
+                                        <p class="settings-section-desc">Fine-tune detection thresholds, Authenticode certificate trust discounts, and disassembly parameters.</p>
+                                    </div>
+
+                                    <!-- Shannon Entropy Threshold -->
+                                    <div class="settings-row">
+                                        <div class="settings-label-col">
+                                            <span class="settings-item-title">Shannon Entropy Packed Threshold</span>
+                                            <span class="settings-item-desc">Threshold in bits/byte to flag high entropy packed or encrypted code (Default: 7.20).</span>
+                                        </div>
+                                        <div class="settings-control-col">
+                                            <div class="slider-with-val">
+                                                <input type="range" class="glass-slider" id="slider-entropy-threshold" min="6.5" max="7.8" step="0.05" value="7.20">
+                                                <span class="slider-val-badge" id="val-entropy-threshold">7.20 bits/byte</span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Authenticode Trust Discount -->
+                                    <div class="settings-row">
+                                        <div class="settings-label-col">
+                                            <span class="settings-item-title">Authenticode Signature Trust Discount</span>
+                                            <span class="settings-item-desc">Apply threat score discount when binary has a cryptographically verified vendor signature.</span>
+                                        </div>
+                                        <div class="settings-control-col">
+                                            <label class="switch">
+                                                <input type="checkbox" id="toggle-authenticode-discount" checked>
+                                                <span class="slider round"></span>
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <!-- Disassembly Instruction Limit -->
+                                    <div class="settings-row">
+                                        <div class="settings-label-col">
+                                            <span class="settings-item-title">Linear Disassembly Instruction Depth</span>
+                                            <span class="settings-item-desc">Maximum instructions decoded for the interactive decompiler &amp; RE tab.</span>
+                                        </div>
+                                        <div class="settings-control-col">
+                                            <div class="segmented-control" id="ctrl-disasm-depth">
+                                                <button class="seg-btn" data-depth="150">150 insns</button>
+                                                <button class="seg-btn active" data-depth="500">500 insns</button>
+                                                <button class="seg-btn" data-depth="1200">1,200 insns</button>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Automatic Landed Tab on Scan Complete -->
+                                    <div class="settings-row">
+                                        <div class="settings-label-col">
+                                            <span class="settings-item-title">Default Landed Tab on Analysis</span>
+                                            <span class="settings-item-desc">Target view automatically presented when file triage completes.</span>
+                                        </div>
+                                        <div class="settings-control-col">
+                                            <select class="glass-select" id="select-landing-tab">
+                                                <option value="overview">Overview (Findings &amp; Breakdown)</option>
+                                                <option value="telemetry">Telemetry Log (Real-time Audit Trail)</option>
+                                                <option value="attack-chain">Attack Chain (7-Stage Threat Graph)</option>
+                                                <option value="decompile">Decompiler &amp; RE (Zydis Linear Disasm)</option>
+                                                <option value="sections">Sections &amp; Headers (Entropy Heatmap)</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Card 4: Usability & Life Helpers -->
+                                <div class="settings-section-card">
+                                    <div class="settings-section-header">
+                                        <span class="settings-section-badge">Life Helpers</span>
+                                        <h3 class="settings-section-title">Workflow &amp; Usability Utilities</h3>
+                                        <p class="settings-section-desc">Convenience features designed to streamline reverse engineering and triage speed.</p>
+                                    </div>
+
+                                    <!-- Auto Copy Hash to Clipboard -->
+                                    <div class="settings-row">
+                                        <div class="settings-label-col">
+                                            <span class="settings-item-title">Automated Hash Clipboard Copy</span>
+                                            <span class="settings-item-desc">Instantly copy SHA-256 hash to Windows clipboard when a file is triaged.</span>
+                                        </div>
+                                        <div class="settings-control-col">
+                                            <label class="switch">
+                                                <input type="checkbox" id="toggle-auto-copy-hash">
+                                                <span class="slider round"></span>
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <!-- Reduced Motion Mode -->
+                                    <div class="settings-row">
+                                        <div class="settings-label-col">
+                                            <span class="settings-item-title">Reduced Motion (Accessibility)</span>
+                                            <span class="settings-item-desc">Disable canvas bobbing, floating physics, and background pulse animations.</span>
+                                        </div>
+                                        <div class="settings-control-col">
+                                            <label class="switch">
+                                                <input type="checkbox" id="toggle-reduced-motion">
+                                                <span class="slider round"></span>
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <!-- UI Font Scale -->
+                                    <div class="settings-row">
+                                        <div class="settings-label-col">
+                                            <span class="settings-item-title">Display Scale &amp; Typography</span>
+                                            <span class="settings-item-desc">Adjust UI text scale across all workbench panels.</span>
+                                        </div>
+                                        <div class="settings-control-col">
+                                            <div class="segmented-control" id="ctrl-font-scale">
+                                                <button class="seg-btn" data-scale="compact">Compact (12px)</button>
+                                                <button class="seg-btn active" data-scale="normal">Default (13px)</button>
+                                                <button class="seg-btn" data-scale="comfort">Comfort (14px)</button>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- System Metadata Summary -->
+                                    <div class="settings-row">
+                                        <div class="settings-label-col">
+                                            <span class="settings-item-title">System &amp; Verification Status</span>
+                                            <span class="settings-item-desc">Koltzi v2.0 • 100% Offline Static Triage Engine</span>
+                                        </div>
+                                        <div class="settings-control-col">
+                                            <div class="system-status-pill">
+                                                <span class="status-dot-green"></span>
+                                                <span>14/14 Tests Verified • Zero Telemetry</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </section>
         </main>
 

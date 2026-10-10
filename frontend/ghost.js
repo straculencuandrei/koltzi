@@ -8,11 +8,18 @@ class GhostCompanion {
         this.bubble = bubbleElement;
 
         this.mood = 'idle'; // 'idle', 'sniffing', 'happy', 'alarmed', 'puzzled'
-        this.theme = 'ember'; // 'ember', 'midnight', 'twilight'
+        this.theme = 'ember'; // 'clean', 'ember', 'malware', 'midnight', 'twilight', 'black', 'light'
         this.currentDialogue = 'Ready for binary analysis. Drop a PE binary or select a sample preset to begin.';
         this.displayedDialogue = '';
         this.typewriterIndex = 0;
         this.typewriterTimer = 0;
+
+        // Settings flags
+        this.enabled = true;
+        this.particlesEnabled = true;
+        this.trackingEnabled = true;
+        this.reducedMotion = false;
+        this.onMoodChange = null;
 
         // Positioning & physics
         this.x = 0;
@@ -40,6 +47,11 @@ class GhostCompanion {
 
         // Mouse tracking
         window.addEventListener('mousemove', (e) => {
+            if (!this.trackingEnabled || this.reducedMotion) {
+                this.targetMouseX = 0;
+                this.targetMouseY = 0;
+                return;
+            }
             const rect = this.canvas.getBoundingClientRect();
             this.targetMouseX = (e.clientX - (rect.left + rect.width / 2)) / (rect.width / 2);
             this.targetMouseY = (e.clientY - (rect.top + rect.height / 2)) / (rect.height / 2);
@@ -84,7 +96,11 @@ class GhostCompanion {
     }
 
     setMood(mood) {
+        const oldMood = this.mood;
         this.mood = mood;
+        if (oldMood !== mood && typeof this.onMoodChange === 'function') {
+            this.onMoodChange(mood);
+        }
     }
 
     setTheme(theme) {
@@ -134,20 +150,27 @@ class GhostCompanion {
         this.setDialogue(picked, false);
 
         // Fun jiggle
-        this.floatOffset -= 8;
-        this.tilt = (Math.random() - 0.5) * 0.16;
+        if (!this.reducedMotion) {
+            this.floatOffset -= 8;
+            this.tilt = (Math.random() - 0.5) * 0.16;
+        }
     }
 
     update(dt) {
         this.time += dt;
 
-        // Floating bobbing physics
-        const bobSpeed = (this.mood === 'alarmed') ? 3.8 : (this.mood === 'sniffing') ? 3.2 : 2.0;
-        const bobAmp = (this.mood === 'happy') ? 8 : 6;
-        this.floatOffset = Math.sin(this.time * bobSpeed) * bobAmp;
-        this.tilt += (-Math.sin(this.time * (bobSpeed * 0.7)) * 0.035 - this.tilt) * Math.min(1, dt * 6);
-
-        this.y = this.baseY + this.floatOffset;
+        if (this.reducedMotion) {
+            this.floatOffset = 0;
+            this.tilt = 0;
+            this.y = this.baseY;
+        } else {
+            // Floating bobbing physics
+            const bobSpeed = (this.mood === 'alarmed') ? 3.8 : (this.mood === 'sniffing') ? 3.2 : 2.0;
+            const bobAmp = (this.mood === 'happy') ? 8 : 6;
+            this.floatOffset = Math.sin(this.time * bobSpeed) * bobAmp;
+            this.tilt += (-Math.sin(this.time * (bobSpeed * 0.7)) * 0.035 - this.tilt) * Math.min(1, dt * 6);
+            this.y = this.baseY + this.floatOffset;
+        }
 
         // Smooth pupil tracking
         this.lookX += (this.targetMouseX - this.lookX) * Math.min(1, dt * 8);
@@ -200,6 +223,7 @@ class GhostCompanion {
     render() {
         const ctx = this.ctx;
         ctx.clearRect(0, 0, this.width, this.height);
+        if (!this.enabled) return;
 
         ctx.save();
         ctx.translate(this.x, this.y);
@@ -209,7 +233,9 @@ class GhostCompanion {
         this.renderAura(ctx);
 
         // 2. Ambient Particles
-        this.renderParticles(ctx);
+        if (this.particlesEnabled && !this.reducedMotion) {
+            this.renderParticles(ctx);
+        }
 
         // 3. Ghost Body
         this.renderBody(ctx);
@@ -228,15 +254,23 @@ class GhostCompanion {
 
     renderAura(ctx) {
         let auraColor = 'rgba(245, 158, 11, 0.24)'; // Default Ember
-        if (this.theme === 'midnight') auraColor = 'rgba(56, 189, 248, 0.26)';
+        if (this.theme === 'clean') auraColor = 'rgba(16, 185, 129, 0.30)';
+        else if (this.theme === 'malware') auraColor = 'rgba(239, 68, 68, 0.32)';
+        else if (this.theme === 'midnight') auraColor = 'rgba(56, 189, 248, 0.26)';
         else if (this.theme === 'twilight') auraColor = 'rgba(167, 139, 250, 0.26)';
+        else if (this.theme === 'black') auraColor = 'rgba(255, 255, 255, 0.14)';
+        else if (this.theme === 'light') auraColor = 'rgba(37, 99, 235, 0.24)';
 
-        if (this.mood === 'happy') auraColor = 'rgba(16, 185, 129, 0.30)'; // Emerald
-        else if (this.mood === 'alarmed') auraColor = 'rgba(239, 68, 68, 0.32)'; // Crimson
+        if (this.mood === 'happy') auraColor = 'rgba(16, 185, 129, 0.32)'; // Clean emerald
+        else if (this.mood === 'alarmed') auraColor = 'rgba(239, 68, 68, 0.35)'; // Crimson malware
         else if (this.mood === 'puzzled') {
-            auraColor = (this.theme === 'twilight') ? 'rgba(192, 132, 252, 0.30)' : 'rgba(245, 158, 11, 0.28)';
+            auraColor = (this.theme === 'clean') ? 'rgba(52, 211, 153, 0.28)' :
+                        (this.theme === 'malware') ? 'rgba(248, 113, 113, 0.30)' :
+                        (this.theme === 'twilight') ? 'rgba(192, 132, 252, 0.30)' : 'rgba(245, 158, 11, 0.28)';
         } else if (this.mood === 'sniffing') {
-            auraColor = (this.theme === 'midnight') ? 'rgba(56, 189, 248, 0.28)' :
+            auraColor = (this.theme === 'clean') ? 'rgba(16, 185, 129, 0.30)' :
+                        (this.theme === 'malware') ? 'rgba(239, 68, 68, 0.32)' :
+                        (this.theme === 'midnight') ? 'rgba(56, 189, 248, 0.28)' :
                         (this.theme === 'twilight') ? 'rgba(192, 132, 252, 0.28)' : 'rgba(245, 158, 11, 0.26)';
         }
 
@@ -254,13 +288,22 @@ class GhostCompanion {
 
     renderParticles(ctx) {
         let pColor = '251, 191, 36';
-        if (this.theme === 'midnight') pColor = '56, 189, 248';
+        if (this.theme === 'clean') pColor = '52, 211, 153';
+        else if (this.theme === 'malware') pColor = '248, 113, 113';
+        else if (this.theme === 'midnight') pColor = '56, 189, 248';
         else if (this.theme === 'twilight') pColor = '192, 132, 252';
+        else if (this.theme === 'black') pColor = '255, 255, 255';
+        else if (this.theme === 'light') pColor = '37, 99, 235';
 
         if (this.mood === 'happy') pColor = '52, 211, 153';
         else if (this.mood === 'alarmed') pColor = '248, 113, 113';
-        else if (this.mood === 'puzzled' || this.mood === 'sniffing') {
-            pColor = (this.theme === 'midnight') ? '56, 189, 248' :
+        else if (this.mood === 'puzzled') {
+            pColor = (this.theme === 'clean') ? '52, 211, 153' :
+                     (this.theme === 'malware') ? '248, 113, 113' : '251, 191, 36';
+        } else if (this.mood === 'sniffing') {
+            pColor = (this.theme === 'clean') ? '52, 211, 153' :
+                     (this.theme === 'malware') ? '248, 113, 113' :
+                     (this.theme === 'midnight') ? '56, 189, 248' :
                      (this.theme === 'twilight') ? '192, 132, 252' : '251, 191, 36';
         }
 
