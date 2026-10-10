@@ -707,7 +707,17 @@ void ThreatAssessor::Assess(const PeReader& pe, TriageReport& report) {
             injNode.evidenceList.push_back(std::move(evRwx));
         }
 
-        report.attackChain.back().nextNodeIds.push_back(injNode.id);
+        // Branch directly from execution node to injection node to form parallel attack paths
+        for (auto& n : report.attackChain) {
+            if (n.id == "stage-execution") {
+                bool found = false;
+                for (const auto& next : n.nextNodeIds) {
+                    if (next == injNode.id) { found = true; break; }
+                }
+                if (!found) n.nextNodeIds.push_back(injNode.id);
+                break;
+            }
+        }
         report.attackChain.push_back(std::move(injNode));
     }
 
@@ -736,7 +746,21 @@ void ThreatAssessor::Assess(const PeReader& pe, TriageReport& report) {
             }
         }
 
-        report.attackChain.back().nextNodeIds.push_back(credNode.id);
+        // Connect both evasion and injection paths into credential harvesting
+        bool linked = false;
+        for (auto& n : report.attackChain) {
+            if (n.id == "stage-evasion" || n.id == "stage-injection") {
+                bool found = false;
+                for (const auto& next : n.nextNodeIds) {
+                    if (next == credNode.id) { found = true; break; }
+                }
+                if (!found) n.nextNodeIds.push_back(credNode.id);
+                linked = true;
+            }
+        }
+        if (!linked && !report.attackChain.empty()) {
+            report.attackChain.back().nextNodeIds.push_back(credNode.id);
+        }
         report.attackChain.push_back(std::move(credNode));
     }
 

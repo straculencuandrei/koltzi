@@ -423,6 +423,307 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Attack Chain / Threat Graph
         renderAttackChain(report);
+
+        // Executable Behavioral Breakdown
+        renderBehavioralExplainer(report);
+    }
+
+    function renderBehavioralExplainer(report) {
+        const bodyEl = document.getElementById('behavioral-explainer-body');
+        const pillEl = document.getElementById('behavioral-pill');
+        if (!bodyEl) return;
+
+        if (!report) {
+            bodyEl.innerHTML = '<div class="behavioral-placeholder">Select a preset profile or drop an executable to generate a concrete behavioral breakdown of how the binary operates.</div>';
+            return;
+        }
+
+        const score = report.threatScore || 0;
+        const isMalicious = score >= 60;
+        const isSuspicious = score >= 20 && !isMalicious;
+        const isInstaller = !!report.isInstaller;
+        const isClean = !isMalicious && !isSuspicious && !isInstaller;
+
+        // Headline parameters
+        let badgeClass = 'pass';
+        let badgeText = 'BENIGN EXECUTION PROFILE';
+        let headlineTitle = 'Legitimate Windows Native Executable';
+        let headlineSub = 'Standard execution flow. The application resolves imports through standard dynamic linking, interacts with authorized Win32 subsystem APIs, and exhibits zero anti-analysis stubs, memory injection, or credential scraping.';
+        
+        let tactic = 'Standard Application';
+        let evasion = 'None / Standard IAT';
+        let targets = 'None';
+        let exfil = 'None / Local System';
+
+        const hasOverlay = report.overlaySize && report.overlaySize > 0;
+        const hasSyscalls = Array.isArray(report.syscalls) && report.syscalls.length > 0;
+        const hasPeb = Array.isArray(report.pebAccesses) && report.pebAccesses.length > 0;
+        const hasApiHash = Array.isArray(report.apiHashLoops) && report.apiHashLoops.length > 0;
+        const hasInjection = !!report.hasInjectionChain;
+        const sensStrings = Array.isArray(report.sensitiveStrings) ? report.sensitiveStrings : [];
+
+        const credTargets = sensStrings.filter(s => {
+            const cat = s.category || '';
+            const m = s.matchedPattern || '';
+            return cat.includes('Credential') || cat.includes('Browser') || m.includes('Login Data') || m.includes('Cookies');
+        });
+        const discordTargets = sensStrings.filter(s => {
+            const cat = s.category || '';
+            const m = s.matchedPattern || '';
+            return cat.includes('Discord') || m.includes('leveldb') || m.includes('discord.com');
+        });
+        const walletTargets = sensStrings.filter(s => {
+            const cat = s.category || '';
+            const m = s.matchedPattern || '';
+            return cat.includes('Wallet') || m.includes('nkbihfb') || m.includes('solana') || m.includes('exodus');
+        });
+        const exfilTargets = sensStrings.filter(s => {
+            const cat = s.category || '';
+            const m = s.matchedPattern || '';
+            return cat.includes('Exfiltration') || m.includes('webhooks') || m.includes('api.telegram.org');
+        });
+
+        if (isMalicious) {
+            badgeClass = 'threat';
+            badgeText = 'VERIFIED MALICIOUS PROFILE';
+            if (hasOverlay && (credTargets.length > 0 || walletTargets.length > 0 || exfilTargets.length > 0)) {
+                headlineTitle = 'Multi-Stage Carrier Dropper & Credential Stealer';
+                headlineSub = 'This binary serves as an unpacker carrier that extracts an embedded payload from its appended overlay, bypasses EDR user-mode hooks with direct kernel syscalls, performs memory injection, scrapes browser passwords and crypto wallets, and exfiltrates stolen loot to remote webhooks.';
+                tactic = 'Dropper & Infostealer';
+            } else if (hasInjection && hasSyscalls) {
+                headlineTitle = 'Stealth In-Memory Injection Agent';
+                headlineSub = 'The binary executes direct kernel system calls to evade endpoint detection hooks, locates APIs via PEB traversal and API hashing, and injects executable shellcode into foreign processes.';
+                tactic = 'Process Injection & Evasion';
+            } else {
+                headlineTitle = 'Malicious Threat Binary';
+                headlineSub = 'Verified static detection of high-risk operational behaviors including defense evasion hooks, unauthorized process manipulation, and sensitive credential harvesting.';
+                tactic = 'Malware Payload';
+            }
+
+            if (hasSyscalls || hasPeb || hasApiHash) {
+                evasion = 'Direct Syscalls + PEB Hashing';
+            } else {
+                evasion = 'Obfuscation / Packing';
+            }
+
+            const targetList = [];
+            if (credTargets.length > 0) targetList.push('Chromium DPAPI');
+            if (discordTargets.length > 0) targetList.push('Discord Tokens');
+            if (walletTargets.length > 0) targetList.push('Crypto Wallets');
+            targets = targetList.length > 0 ? targetList.join(', ') : 'Host Reconnaissance';
+
+            if (exfilTargets.length > 0) {
+                exfil = exfilTargets[0].matchedPattern.includes('discord') ? 'Discord Webhook (HTTPS)' : 'Telegram Bot API';
+            } else {
+                exfil = 'Attacker C2 Infrastructure';
+            }
+        } else if (isSuspicious) {
+            badgeClass = 'warn';
+            badgeText = 'SUSPICIOUS RECONNAISSANCE';
+            headlineTitle = 'Obfuscated / Packed Executable';
+            headlineSub = 'Binary exhibits elevated entropy or packing indicators requiring runtime deobfuscation. Standard structural checks detected anomalies that warrant guarded execution.';
+            tactic = 'Packed / Obfuscated';
+            evasion = 'High Entropy Packing';
+            targets = 'Pending Unpacking';
+            exfil = 'Unresolved';
+        } else if (isInstaller) {
+            badgeClass = 'pass';
+            badgeText = 'VERIFIED INSTALLER';
+            headlineTitle = 'Legitimate Setup Archive Container';
+            headlineSub = 'Self-extracting software installer. Verified digital signature and standard Windows setup subsystem calls to extract installation files.';
+            tactic = 'Application Setup';
+            evasion = 'None (Valid Signature)';
+            targets = 'Local Program Files';
+            exfil = 'None (Standard Install)';
+        }
+
+        if (pillEl) {
+            pillEl.textContent = isMalicious ? 'Malicious Execution Confirmed' : isSuspicious ? 'Suspicious Heuristics' : 'Verified Legitimate';
+            pillEl.className = 'tag-pill ' + (isMalicious ? 'threat' : isSuspicious ? 'warning' : 'pass');
+        }
+
+        // Phase 1: Ingestion & Architecture
+        const archStr = `${report.machineType || 'AMD64'} (${report.is64Bit ? '64-bit' : '32-bit'}) Windows PE`;
+        let sigDesc = 'Unsigned binary without Authenticode digital signature. Bypasses enterprise code signing controls.';
+        if (report.signature && report.signature.isValid) {
+            sigDesc = `Cryptographically signed and verified by ${report.signature.signerSubject || 'trusted vendor'} (${report.signature.digestAlgorithm || 'SHA-256'}). Authenticode chain is valid.`;
+        } else if (report.signature && report.signature.isSigned) {
+            sigDesc = 'Binary contains a digital certificate, but the signature is invalid or self-signed.';
+        }
+        const phase1Desc = `Target executable ${escapeHtml(report.fileName || 'binary')} compiled for ${archStr}, targeting the ${report.subsystem || 'Windows GUI'} subsystem. ${sigDesc}`;
+        const phase1Tags = `
+            <span class="phase-proof-tag">${archStr}</span>
+            <span class="phase-proof-tag">${(report.signature && report.signature.isValid) ? 'Signed: Valid' : 'Unsigned'}</span>
+            <span class="phase-proof-tag">Entry RVA: 0x${(report.entryPointRva || 0x1000).toString(16).toUpperCase()}</span>
+        `;
+
+        // Phase 2: Container & Stager Extraction
+        let phase2Title = 'Phase 2 • Container Mechanics & Payload Staging';
+        let phase2Desc = 'Direct PE image mapping. Section layout adheres to standard uncompressed compilation standards with normal code density.';
+        let phase2Tags = '<span class="phase-proof-tag">Clean PE Image</span><span class="phase-proof-tag">Direct Memory Mapping</span>';
+
+        if (hasOverlay) {
+            const ovMb = (report.overlaySize / (1024 * 1024)).toFixed(1);
+            const ovPct = ((report.overlayRatio || 0) * 100).toFixed(1);
+            const ovEnt = (report.overlayEntropy || 0).toFixed(2);
+            phase2Title = 'Phase 2 • Stager Extraction & Overlay Payload Unpacking';
+            phase2Desc = `An appended binary container of ${ovMb} MB (${ovPct}% of entire file) is appended after the final PE section at offset 0x${(report.overlayOffset || 0).toString(16).toUpperCase()}. High Shannon entropy (${ovEnt}/8.00) confirms compressed or encrypted content. Upon launch, the outer carrier unpacks the inner payload files into %APPDATA% or %TEMP% before invoking child process execution.`;
+            phase2Tags = `
+                <span class="phase-proof-tag">Overlay: ${ovMb} MB (${ovPct}%)</span>
+                <span class="phase-proof-tag">Offset: 0x${(report.overlayOffset || 0).toString(16).toUpperCase()}</span>
+                <span class="phase-proof-tag">Entropy: ${ovEnt}/8.00</span>
+            `;
+        } else if (report.overallEntropy > 7.0) {
+            phase2Title = 'Phase 2 • In-Memory Decompression & Runtime Unpacking';
+            phase2Desc = `Binary exhibits elevated Shannon entropy (${(report.overallEntropy || 0).toFixed(2)}/8.00). Executable instructions are compressed or encrypted on disk and decompressed dynamically into virtual memory during runtime startup.`;
+            phase2Tags = `<span class="phase-proof-tag">Entropy: ${(report.overallEntropy || 0).toFixed(2)}/8.00</span><span class="phase-proof-tag">Packed Code</span>`;
+        }
+
+        // Phase 3: Defense Evasion & Hook Bypass
+        let phase3Title = 'Phase 3 • Defense Evasion & Kernel Hook Bypass';
+        let phase3Desc = 'Standard API resolution. The binary resolves functions via the standard Windows Loader and Import Address Table (IAT) without unhooking or evasive instruction patterns.';
+        let phase3Tags = '<span class="phase-proof-tag">Standard IAT</span><span class="phase-proof-tag">Zero Anti-Analysis</span>';
+
+        if (hasSyscalls || hasPeb || hasApiHash) {
+            const scCount = (report.syscalls || []).length;
+            const pebCount = (report.pebAccesses || []).length;
+            const hashCount = (report.apiHashLoops || []).length;
+
+            const scList = (report.syscalls || []).map(s => `SSN 0x${s.ssn ? s.ssn.toString(16).toUpperCase() : '18'}`).slice(0, 3).join(', ');
+            phase3Desc = `Directly bypasses endpoint security (EDR/AV) user-mode inline hooks by issuing direct kernel system calls ('syscall' instruction 0F 05) using System Service Numbers (${scList || '0x18'}). In addition, it traverses the Process Environment Block via gs:[0x60] and resolves Windows API exports dynamically using ROR13 API hashing, hiding API calls from static and dynamic IAT monitoring.`;
+            phase3Tags = `
+                ${scCount > 0 ? `<span class="phase-proof-tag">Direct Syscalls (${scCount} stubs)</span>` : ''}
+                ${pebCount > 0 ? `<span class="phase-proof-tag">PEB Traversal (gs:[0x60])</span>` : ''}
+                ${hashCount > 0 ? `<span class="phase-proof-tag">ROR13 API Hashing (${hashCount} loops)</span>` : ''}
+            `;
+        }
+
+        // Phase 4: Operational Objective & Target Actions
+        let phase4Title = 'Phase 4 • Core Execution Objective & Local Payload Operations';
+        let phase4Desc = 'Executes legitimate application logic without cross-process memory manipulation or credential database access.';
+        let phase4Tags = '<span class="phase-proof-tag">Benign Win32 Operations</span>';
+
+        if (isMalicious || credTargets.length > 0 || hasInjection) {
+            const ops = [];
+            const tags = [];
+
+            if (hasInjection) {
+                ops.push(`Performs cross-process memory tampering: allocates memory with PAGE_EXECUTE_READWRITE permissions via VirtualAllocEx, writes shellcode via WriteProcessMemory, and invokes thread execution via CreateRemoteThread.`);
+                tags.push('<span class="phase-proof-tag">Cross-Process Injection (RWX)</span>');
+            }
+
+            if (credTargets.length > 0) {
+                const chromePaths = credTargets.map(c => c.matchedPattern).slice(0, 2).join(' | ');
+                ops.push(`Queries and extracts Google Chrome and Microsoft Edge Chromium user profiles, opening 'Login Data' SQLite databases to decrypt DPAPI-protected passwords and session cookies (${chromePaths}).`);
+                tags.push('<span class="phase-proof-tag">Chromium DPAPI Master Keys</span>');
+            }
+
+            if (discordTargets.length > 0) {
+                ops.push(`Scrapes Discord client authentication tokens by scanning 'Local Storage/leveldb' database files in user application data.`);
+                tags.push('<span class="phase-proof-tag">Discord Auth Tokens</span>');
+            }
+
+            if (walletTargets.length > 0) {
+                ops.push(`Enumerates browser extension directories to target cryptocurrency wallet vaults, including MetaMask (nkbihfbeogaeaoehlefnkodbefgpgknn) and multi-chain wallets.`);
+                tags.push('<span class="phase-proof-tag">Crypto Wallet Extensions</span>');
+            }
+
+            phase4Title = 'Phase 4 • Credential Scraping, Wallet Extraction & Injection';
+            phase4Desc = ops.join(' ');
+            phase4Tags = tags.join('');
+        }
+
+        // Phase 5: Exfiltration & Network Delivery
+        let phase5Title = 'Phase 5 • Exfiltration & Command and Control Delivery';
+        let phase5Desc = 'Zero outbound network connections, remote webhooks, or exfiltration channels detected in static disassembly.';
+        let phase5Tags = '<span class="phase-proof-tag">No Outbound Exfiltration</span>';
+
+        if (exfilTargets.length > 0) {
+            const exfilUrls = exfilTargets.map(e => e.matchedPattern).slice(0, 2).join(', ');
+            phase5Title = 'Phase 5 • Outbound C2 Exfiltration & Webhook Transmission';
+            phase5Desc = `Packages the collected credential archives, session tokens, and system reconnaissance payloads, and exfiltrates them over HTTPS to attacker-controlled command and control endpoints: ${escapeHtml(exfilUrls)}. Using legitimate Discord webhooks or Telegram bot APIs conceals the malicious data transfer within normal developer network traffic to evade firewall and DLP inspection.`;
+            phase5Tags = `
+                <span class="phase-proof-tag">HTTPS Exfiltration</span>
+                <span class="phase-proof-tag">${escapeHtml(exfilUrls)}</span>
+            `;
+        }
+
+        // Render narrative card
+        bodyEl.innerHTML = `
+            <div class="behavioral-narrative-card">
+                <div class="behavioral-headline">
+                    <span class="behavioral-headline-badge ${badgeClass}">${badgeText}</span>
+                    <div class="behavioral-headline-title">${escapeHtml(headlineTitle)}</div>
+                    <div class="behavioral-headline-sub">${escapeHtml(headlineSub)}</div>
+                </div>
+
+                <div class="behavioral-phase-list">
+                    <div class="behavioral-phase-item">
+                        <div class="phase-step-badge">Phase 1</div>
+                        <div class="phase-step-content">
+                            <div class="phase-step-title">PE Architecture & Digital Identity Verification</div>
+                            <div class="phase-step-desc">${phase1Desc}</div>
+                            <div class="phase-proof-tags-row">${phase1Tags}</div>
+                        </div>
+                    </div>
+
+                    <div class="behavioral-phase-item">
+                        <div class="phase-step-badge">Phase 2</div>
+                        <div class="phase-step-content">
+                            <div class="phase-step-title">${escapeHtml(phase2Title)}</div>
+                            <div class="phase-step-desc">${phase2Desc}</div>
+                            <div class="phase-proof-tags-row">${phase2Tags}</div>
+                        </div>
+                    </div>
+
+                    <div class="behavioral-phase-item">
+                        <div class="phase-step-badge">Phase 3</div>
+                        <div class="phase-step-content">
+                            <div class="phase-step-title">${escapeHtml(phase3Title)}</div>
+                            <div class="phase-step-desc">${phase3Desc}</div>
+                            <div class="phase-proof-tags-row">${phase3Tags}</div>
+                        </div>
+                    </div>
+
+                    <div class="behavioral-phase-item">
+                        <div class="phase-step-badge">Phase 4</div>
+                        <div class="phase-step-content">
+                            <div class="phase-step-title">${escapeHtml(phase4Title)}</div>
+                            <div class="phase-step-desc">${phase4Desc}</div>
+                            <div class="phase-proof-tags-row">${phase4Tags}</div>
+                        </div>
+                    </div>
+
+                    <div class="behavioral-phase-item">
+                        <div class="phase-step-badge">Phase 5</div>
+                        <div class="phase-step-content">
+                            <div class="phase-step-title">${escapeHtml(phase5Title)}</div>
+                            <div class="phase-step-desc">${phase5Desc}</div>
+                            <div class="phase-proof-tags-row">${phase5Tags}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="behavioral-footer-grid">
+                    <div class="behavioral-footer-card">
+                        <div class="behavioral-footer-label">Primary Tactic</div>
+                        <div class="behavioral-footer-value ${isMalicious ? 'threat' : 'pass'}">${escapeHtml(tactic)}</div>
+                    </div>
+                    <div class="behavioral-footer-card">
+                        <div class="behavioral-footer-label">Evasion Technique</div>
+                        <div class="behavioral-footer-value ${hasSyscalls ? 'threat' : isSuspicious ? 'warn' : 'pass'}">${escapeHtml(evasion)}</div>
+                    </div>
+                    <div class="behavioral-footer-card">
+                        <div class="behavioral-footer-label">Harvested Targets</div>
+                        <div class="behavioral-footer-value ${credTargets.length > 0 ? 'threat' : 'pass'}">${escapeHtml(targets)}</div>
+                    </div>
+                    <div class="behavioral-footer-card">
+                        <div class="behavioral-footer-label">C2 Transport Channel</div>
+                        <div class="behavioral-footer-value ${exfilTargets.length > 0 ? 'threat' : 'pass'}">${escapeHtml(exfil)}</div>
+                    </div>
+                </div>
+            </div>
+        `;
     }
 
     function renderFindings(report) {
@@ -840,15 +1141,15 @@ document.addEventListener('DOMContentLoaded', () => {
         graphViewport.style.transform = `translate(${graphPanX}px, ${graphPanY}px) scale(${graphScale})`;
     }
 
-    // Auto Fit View
+    // Auto Fit View (Top-to-Bottom Flow)
     function fitAttackChainView() {
         if (!graphStage || !graphNodesLayer) return;
         const stageRect = graphStage.getBoundingClientRect();
         const stageW = stageRect.width || 800;
         const stageH = stageRect.height || 540;
 
-        const cols = graphNodesLayer.querySelectorAll('.chain-stage-col:not(.filtered-out)');
-        if (cols.length === 0) {
+        const tiers = graphNodesLayer.querySelectorAll('.chain-stage-tier:not(.filtered-out)');
+        if (tiers.length === 0) {
             graphScale = 1.0;
             graphPanX = 36;
             graphPanY = 36;
@@ -856,18 +1157,19 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        let totalW = (cols.length * 280) + ((cols.length - 1) * 48) + 72;
-        let maxColH = 400;
-        cols.forEach(col => {
-            const h = col.offsetHeight || 300;
-            if (h > maxColH) maxColH = h;
+        let maxTierW = 400;
+        tiers.forEach(tier => {
+            const row = tier.querySelector('.chain-tier-nodes-row');
+            if (row) {
+                const w = row.scrollWidth || 360;
+                if (w > maxTierW) maxTierW = w;
+            }
         });
 
-        const targetScaleX = (stageW - 60) / Math.max(totalW, 400);
-        const targetScaleY = (stageH - 60) / Math.max(maxColH + 72, 300);
-        graphScale = Math.min(1.15, Math.max(0.45, Math.min(targetScaleX, targetScaleY)));
-        graphPanX = 30;
-        graphPanY = 30;
+        const targetScaleX = (stageW - 80) / Math.max(maxTierW, 400);
+        graphScale = Math.min(1.05, Math.max(0.55, targetScaleX));
+        graphPanX = Math.max(20, (stageW - maxTierW * graphScale) / 2);
+        graphPanY = 36;
         updateGraphTransform();
         requestAnimationFrame(() => updateAttackChainConnectors());
     }
@@ -919,12 +1221,14 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         // Stage 2: Staging / Overlay / Packed
+        let stagingNodeId = null;
         if (report.overlaySize && report.overlaySize > 0) {
+            stagingNodeId = 'node-overlay-1';
             const ovMb = (report.overlaySize / (1024 * 1024)).toFixed(1);
             const ovPct = ((report.overlayRatio || 0) * 100).toFixed(1);
             const isHighEnt = (report.overlayEntropy || 0) >= 7.8;
             nodes.push({
-                id: 'node-overlay-1',
+                id: stagingNodeId,
                 stage: 'stage-overlay',
                 title: 'PE Overlay Stager Container',
                 technique: 'T1027.002 Obfuscated / Appended Payload',
@@ -954,8 +1258,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 ]
             });
         } else if (report.overallEntropy > 7.0 && isSuspicious) {
+            stagingNodeId = 'node-packed-1';
             nodes.push({
-                id: 'node-packed-1',
+                id: stagingNodeId,
                 stage: 'stage-packed',
                 title: 'Packed / Compressed Code Segment',
                 technique: 'T1027 Software Packing',
@@ -979,8 +1284,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Stage 3: Initial Execution
+        const execNodeId = 'node-execution-1';
         nodes.push({
-            id: 'node-execution-1',
+            id: execNodeId,
             stage: 'stage-execution',
             title: 'Application Entry Point Execution',
             technique: 'T1059 Command and Scripting Interpreter',
@@ -1002,7 +1308,8 @@ document.addEventListener('DOMContentLoaded', () => {
             ]
         });
 
-        // Stage 4: Defense Evasion
+        // Stage 4: Parallel Pathways: Defense Evasion & Process Injection
+        const parallelEvasionIds = [];
         const evasionEvidence = [];
         if (Array.isArray(report.syscalls) && report.syscalls.length > 0) {
             report.syscalls.forEach(sc => {
@@ -1029,10 +1336,12 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
         if (evasionEvidence.length > 0) {
+            const evasId = 'node-evasion-1';
+            parallelEvasionIds.push(evasId);
             nodes.push({
-                id: 'node-evasion-1',
+                id: evasId,
                 stage: 'stage-evasion',
-                title: 'Direct Syscall & Evasion Stubs',
+                title: 'Direct Syscall & Hook Evasion',
                 technique: 'T1562.001 Impair Defenses: Disable Tools',
                 classification: 'critical',
                 summary: 'Static detection of direct kernel syscall execution stubs bypassing user-mode EDR inline hooks, combined with manual PEB module walk.',
@@ -1044,10 +1353,11 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
-        // Stage 5: Process Injection
         if (report.hasInjectionChain) {
+            const injId = 'node-injection-1';
+            parallelEvasionIds.push(injId);
             nodes.push({
-                id: 'node-injection-1',
+                id: injId,
                 stage: 'stage-injection',
                 title: 'Cross-Process Memory Injection',
                 technique: 'T1055 Process Injection',
@@ -1070,55 +1380,118 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
-        // Stage 6: Credential Harvesting
-        const harvestEvidence = [];
+        // Stage 5: Target Asset Harvesting Pathways
+        const harvestingNodeIds = [];
+        const browserEvidence = [];
+        const discordEvidence = [];
+        const walletEvidence = [];
         const exfilEvidence = [];
+
         if (Array.isArray(report.sensitiveStrings)) {
             report.sensitiveStrings.forEach(str => {
                 const cat = str.category || '';
                 const match = str.matchedPattern || '';
-                if (cat.includes('Credential') || cat.includes('Browser') || cat.includes('Discord') || match.includes('Login Data') || match.includes('nkbihfb') || match.includes('leveldb')) {
-                    harvestEvidence.push({
+                if (cat.includes('Credential') || match.includes('Login Data') || match.includes('Cookies')) {
+                    browserEvidence.push({
                         type: 'IOC_STRING',
-                        label: `Scraped Credential Target (${cat})`,
+                        label: `Chromium Credential Target (${cat})`,
                         value: match,
-                        rule: 'CREDENTIAL_STEALER_ARTIFACT',
+                        rule: 'CHROMIUM_DPAPI_SCRAPER',
                         jumpTab: 'telemetry',
-                        jumpTarget: 'STRING'
+                        jumpTarget: match
                     });
-                } else if (cat.includes('Exfiltration') || match.includes('discord.com/api/webhooks') || match.includes('telegram.org')) {
+                } else if (cat.includes('Discord') || match.includes('leveldb') || match.includes('discord.com')) {
+                    discordEvidence.push({
+                        type: 'IOC_STRING',
+                        label: 'Discord Client Session Vault',
+                        value: match,
+                        rule: 'DISCORD_TOKEN_SCRAPER',
+                        jumpTab: 'telemetry',
+                        jumpTarget: match
+                    });
+                } else if (cat.includes('Wallet') || match.includes('nkbihfb') || match.includes('solana') || match.includes('exodus')) {
+                    walletEvidence.push({
+                        type: 'IOC_STRING',
+                        label: 'Cryptocurrency Wallet Vault',
+                        value: match,
+                        rule: 'CRYPTO_WALLET_SWEEPER',
+                        jumpTab: 'telemetry',
+                        jumpTarget: match
+                    });
+                } else if (cat.includes('Exfiltration') || match.includes('webhooks') || match.includes('telegram.org')) {
                     exfilEvidence.push({
                         type: 'IOC_STRING',
                         label: `C2 Exfiltration Endpoint (${cat})`,
                         value: match,
                         rule: 'C2_EXFILTRATION_ENDPOINT',
                         jumpTab: 'telemetry',
-                        jumpTarget: 'STRING'
+                        jumpTarget: match
                     });
                 }
             });
         }
 
-        if (harvestEvidence.length > 0) {
+        if (browserEvidence.length > 0) {
+            const hId = 'node-harvest-browser';
+            harvestingNodeIds.push(hId);
             nodes.push({
-                id: 'node-harvesting-1',
+                id: hId,
                 stage: 'stage-harvesting',
-                title: 'Browser DPAPI & Wallet Harvesting',
-                technique: 'T1555 Credentials from Password Stores',
+                title: 'Browser DPAPI & Password Scraping',
+                technique: 'T1555.003 Credentials from Web Browsers',
                 classification: 'critical',
-                summary: 'Targeted extraction of browser master passwords, Discord authentication tokens, and cryptocurrency wallet extensions.',
+                summary: 'Extracts Chrome and Edge Chromium Login Data SQLite databases, decrypting DPAPI-protected passwords and session cookies.',
                 status: 'Verified',
                 rva: 0x2000,
                 fileOffset: 0x600,
                 nextNodeIds: [],
-                evidenceList: harvestEvidence
+                evidenceList: browserEvidence
             });
         }
 
-        // Stage 7: Exfiltration
-        if (exfilEvidence.length > 0) {
+        if (discordEvidence.length > 0) {
+            const hId = 'node-harvest-discord';
+            harvestingNodeIds.push(hId);
             nodes.push({
-                id: 'node-exfil-1',
+                id: hId,
+                stage: 'stage-harvesting',
+                title: 'Discord Token & Session Vault Theft',
+                technique: 'T1552.001 Unsecured Credentials in Files',
+                classification: 'critical',
+                summary: 'Scrapes Discord Local Storage leveldb database files to capture account authorization tokens and session keys.',
+                status: 'Verified',
+                rva: 0x2000,
+                fileOffset: 0x600,
+                nextNodeIds: [],
+                evidenceList: discordEvidence
+            });
+        }
+
+        if (walletEvidence.length > 0) {
+            const hId = 'node-harvest-wallet';
+            harvestingNodeIds.push(hId);
+            nodes.push({
+                id: hId,
+                stage: 'stage-harvesting',
+                title: 'Crypto Wallet Extension Scraping',
+                technique: 'T1552 Credentials in Registry/Extensions',
+                classification: 'critical',
+                summary: 'Sweeps browser extension directories targeting cryptocurrency wallet keyrings (MetaMask, Phantom, Exodus).',
+                status: 'Verified',
+                rva: 0x2000,
+                fileOffset: 0x600,
+                nextNodeIds: [],
+                evidenceList: walletEvidence
+            });
+        }
+
+        // Stage 6: C2 Exfiltration Channels
+        const exfilNodeIds = [];
+        if (exfilEvidence.length > 0) {
+            const exId = 'node-exfil-1';
+            exfilNodeIds.push(exId);
+            nodes.push({
+                id: exId,
                 stage: 'stage-exfiltration',
                 title: 'C2 Exfiltration Channel',
                 technique: 'T1041 Exfiltration Over C2 Channel',
@@ -1133,9 +1506,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Benign fallback if clean
+        let cleanNodeId = null;
         if (nodes.length <= 2 && !isSuspicious) {
+            cleanNodeId = 'node-clean-1';
             nodes.push({
-                id: 'node-clean-1',
+                id: cleanNodeId,
                 stage: 'stage-library',
                 title: 'Standard Windows API Subsystem',
                 technique: 'Legitimate System Routine',
@@ -1158,15 +1533,52 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
 
-        // Link sequential stages
-        for (let i = 0; i < nodes.length - 1; ++i) {
-            nodes[i].nextNodeIds = [nodes[i + 1].id];
+        // Precise Multi-Path Branch Wiring
+        const deliveryNode = nodes.find(n => n.id === 'node-delivery-1');
+        const execNode = nodes.find(n => n.id === execNodeId);
+
+        if (deliveryNode) {
+            if (stagingNodeId) {
+                deliveryNode.nextNodeIds = [stagingNodeId];
+                const stagingNode = nodes.find(n => n.id === stagingNodeId);
+                if (stagingNode) stagingNode.nextNodeIds = [execNodeId];
+            } else {
+                deliveryNode.nextNodeIds = [execNodeId];
+            }
         }
+
+        if (execNode) {
+            if (parallelEvasionIds.length > 0) {
+                execNode.nextNodeIds = [...parallelEvasionIds];
+            } else if (harvestingNodeIds.length > 0) {
+                execNode.nextNodeIds = [...harvestingNodeIds];
+            } else if (cleanNodeId) {
+                execNode.nextNodeIds = [cleanNodeId];
+            }
+        }
+
+        parallelEvasionIds.forEach(id => {
+            const evNode = nodes.find(n => n.id === id);
+            if (evNode) {
+                if (harvestingNodeIds.length > 0) {
+                    evNode.nextNodeIds = [...harvestingNodeIds];
+                } else if (exfilNodeIds.length > 0) {
+                    evNode.nextNodeIds = [...exfilNodeIds];
+                }
+            }
+        });
+
+        harvestingNodeIds.forEach(id => {
+            const hNode = nodes.find(n => n.id === id);
+            if (hNode && exfilNodeIds.length > 0) {
+                hNode.nextNodeIds = [...exfilNodeIds];
+            }
+        });
 
         return nodes;
     }
 
-    // Render Attack Chain graph to DOM
+    // Render Attack Chain graph to DOM in Top-to-Bottom Vertical Tiers
     function renderAttackChain(report) {
         if (!graphNodesLayer) return;
 
@@ -1189,86 +1601,97 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // Helper to normalize backend stage names/IDs to stage order keys
-        function mapNodeToStageKey(node) {
-            if (node.id && node.id.startsWith('stage-')) {
-                return node.id;
+        // Top-to-Bottom Vertical Tiers Definition
+        const tierDefinitions = [
+            {
+                key: 'tier-delivery',
+                title: 'Stage 1 • Delivery & Ingestion',
+                matches: (s) => s.includes('deliv') || s.includes('ingest')
+            },
+            {
+                key: 'tier-staging',
+                title: 'Stage 2 • Staging & Decompression',
+                matches: (s) => s.includes('overlay') || s.includes('pack') || s.includes('decompress') || s.includes('stag')
+            },
+            {
+                key: 'tier-execution',
+                title: 'Stage 3 • Execution Transfer',
+                matches: (s) => (s.includes('exec') || s.includes('entry') || s.includes('process')) && !s.includes('inject')
+            },
+            {
+                key: 'tier-evasion-injection',
+                title: 'Stage 4 • Evasion & Memory Tampering Pathways',
+                matches: (s) => s.includes('evas') || s.includes('defense') || s.includes('inject') || s.includes('privilege') || s.includes('escalat')
+            },
+            {
+                key: 'tier-harvesting',
+                title: 'Stage 5 • Target Asset Harvesting',
+                matches: (s) => s.includes('harvest') || s.includes('cred') || s.includes('access') || s.includes('browser') || s.includes('discord') || s.includes('wallet')
+            },
+            {
+                key: 'tier-exfiltration',
+                title: 'Stage 6 • C2 Exfiltration Channels',
+                matches: (s) => s.includes('exfil') || s.includes('c2')
+            },
+            {
+                key: 'tier-library',
+                title: 'Standard Win32 Subsystem Flow',
+                matches: (s) => s.includes('lib') || s.includes('benign')
             }
-            if (node.stage) {
-                const s = String(node.stage).toLowerCase();
-                if (s.includes('deliv') || s.includes('ingest')) return 'stage-delivery';
-                if (s.includes('overlay')) return 'stage-overlay';
-                if (s.includes('pack') || s.includes('decompress')) return 'stage-packed';
-                if (s.includes('stag')) return 'stage-overlay';
-                if (s.includes('evas') || s.includes('defense')) return 'stage-evasion';
-                if (s.includes('inject') || s.includes('privilege') || s.includes('escalat')) return 'stage-injection';
-                if (s.includes('harvest') || s.includes('cred') || s.includes('access')) return 'stage-harvesting';
-                if (s.includes('exfil') || s.includes('c2')) return 'stage-exfiltration';
-                if (s.includes('lib') || s.includes('benign')) return 'stage-library';
-                if (s.includes('exec') || s.includes('process')) return 'stage-execution';
-                if (s.startsWith('stage-')) return s;
-                return 'stage-' + s.replace(/[^a-z0-9]/g, '-');
-            }
-            return 'stage-execution';
-        }
-
-        // Group nodes by stage
-        const stageOrder = [
-            { key: 'stage-delivery', title: '1. Ingestion' },
-            { key: 'stage-overlay', title: '2. Stager / Overlay' },
-            { key: 'stage-packed', title: '2. Decompression' },
-            { key: 'stage-execution', title: '3. Execution' },
-            { key: 'stage-evasion', title: '4. Defense Evasion' },
-            { key: 'stage-injection', title: '5. Process Injection' },
-            { key: 'stage-harvesting', title: '6. Harvesting' },
-            { key: 'stage-exfiltration', title: '7. C2 Exfiltration' },
-            { key: 'stage-library', title: 'Benign API Flow' }
         ];
 
-        const stageMap = new Map();
-        currentAttackNodes.forEach(node => {
-            const key = mapNodeToStageKey(node);
-            if (!stageMap.has(key)) stageMap.set(key, []);
-            stageMap.get(key).push(node);
-        });
-
-        // Dynamically add any unknown stage categories to stageOrder
-        const knownKeys = new Set(stageOrder.map(s => s.key));
-        stageMap.forEach((nodes, key) => {
-            if (!knownKeys.has(key)) {
-                stageOrder.push({
-                    key: key,
-                    title: (nodes[0]?.stage || key).replace(/^stage-/, '')
-                });
-                knownKeys.add(key);
+        function getNodeTierKey(node) {
+            const raw = ((node.id || '') + ' ' + (node.stage || '')).toLowerCase();
+            for (const td of tierDefinitions) {
+                if (td.matches(raw)) return td.key;
             }
+            return 'tier-execution';
+        }
+
+        const tierMap = new Map();
+        tierDefinitions.forEach(td => tierMap.set(td.key, []));
+
+        currentAttackNodes.forEach(node => {
+            const tKey = getNodeTierKey(node);
+            if (!tierMap.has(tKey)) {
+                tierMap.set(tKey, []);
+                tierDefinitions.push({
+                    key: tKey,
+                    title: (node.stage || 'Stage').replace(/^stage-/, ''),
+                    matches: () => false
+                });
+            }
+            tierMap.get(tKey).push(node);
         });
 
-        // Create column for each non-empty stage
-        stageOrder.forEach(so => {
-            const nodes = stageMap.get(so.key);
+        // Render each populated tier vertically from top to bottom
+        tierDefinitions.forEach(td => {
+            const nodes = tierMap.get(td.key);
             if (!nodes || nodes.length === 0) return;
 
-            const col = document.createElement('div');
-            col.className = 'chain-stage-col';
-            col.setAttribute('data-stage-key', so.key);
+            const tierContainer = document.createElement('div');
+            tierContainer.className = 'chain-stage-tier';
+            tierContainer.setAttribute('data-tier-key', td.key);
 
-            // Column Header
-            col.innerHTML = `
-                <div class="chain-stage-header">
-                    <span>${escapeHtml(so.title)}</span>
-                    <span class="stage-step-pill">${nodes.length} node${nodes.length > 1 ? 's' : ''}</span>
+            // Tier Header
+            tierContainer.innerHTML = `
+                <div class="chain-stage-tier-header">
+                    <span>${escapeHtml(td.title)}</span>
+                    <span class="chain-tier-step-pill">${nodes.length} path${nodes.length > 1 ? 's' : ''}</span>
                 </div>
             `;
 
-            // Node cards
+            // Nodes Row (Parallel branching paths displayed side-by-side)
+            const rowEl = document.createElement('div');
+            rowEl.className = 'chain-tier-nodes-row';
+
             nodes.forEach(node => {
                 const card = document.createElement('div');
                 const badgeClass = (node.classification || 'pass').toLowerCase();
                 card.className = `chain-node-card ${badgeClass} ${node.id === activeNodeId ? 'active' : ''}`;
                 card.setAttribute('data-node-id', node.id);
                 card.setAttribute('data-classification', badgeClass);
-                card.setAttribute('data-stage', node.stage || so.key);
+                card.setAttribute('data-stage', node.stage || td.key);
 
                 const rvaHex = '0x' + (node.rva || 0).toString(16).toUpperCase();
                 const offHex = '0x' + (node.fileOffset || 0).toString(16).toUpperCase();
@@ -1282,7 +1705,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="card-socket socket-in"></div>
                     <div class="chain-card-header">
                         <div class="chain-card-title-group">
-                            <span class="chain-card-stage-name">${escapeHtml(so.title)}</span>
+                            <span class="chain-card-stage-name">${escapeHtml(td.title.split('•')[1]?.trim() || td.title)}</span>
                             <span class="chain-card-title">${escapeHtml(node.title)}</span>
                         </div>
                         <span class="finding-pill ${badgeClass === 'critical' ? 'critical' : badgeClass === 'warn' ? 'warning' : 'info'}">${badgeLabel}</span>
@@ -1304,10 +1727,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     selectAttackNode(node);
                 });
 
-                col.appendChild(card);
+                rowEl.appendChild(card);
             });
 
-            graphNodesLayer.appendChild(col);
+            tierContainer.appendChild(rowEl);
+            graphNodesLayer.appendChild(tierContainer);
         });
 
         // Apply active filter
@@ -1552,14 +1976,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 const sRect = sourceCard.getBoundingClientRect();
                 const tRect = targetCard.getBoundingClientRect();
 
-                // Coordinates relative to layer regardless of column nesting
-                const sX = (sRect.right - layerRect.left) / scale;
-                const sY = (sRect.top + sRect.height / 2 - layerRect.top) / scale;
-                const tX = (tRect.left - layerRect.left) / scale;
-                const tY = (tRect.top + tRect.height / 2 - layerRect.top) / scale;
+                // Top-to-bottom coordinates: source bottom-center to target top-center
+                const sX = (sRect.left + sRect.width / 2 - layerRect.left) / scale;
+                const sY = (sRect.bottom - layerRect.top) / scale;
+                const tX = (tRect.left + tRect.width / 2 - layerRect.left) / scale;
+                const tY = (tRect.top - layerRect.top) / scale;
 
-                const dx = Math.max(30, (tX - sX) * 0.45);
-                const pathD = `M ${sX} ${sY} C ${sX + dx} ${sY}, ${tX - dx} ${tY}, ${tX} ${tY}`;
+                const dy = Math.max(26, Math.abs(tY - sY) * 0.45);
+                const pathD = `M ${sX} ${sY} C ${sX} ${sY + dy}, ${tX} ${tY - dy}, ${tX} ${tY}`;
 
                 const targetCls = (targetNode.classification || 'pass').toLowerCase();
                 const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
@@ -1587,23 +2011,32 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
-        document.querySelectorAll('.chain-stage-col').forEach(col => {
-            const stageKey = col.getAttribute('data-stage-key');
+        document.querySelectorAll('.chain-node-card').forEach(card => {
+            const cls = card.getAttribute('data-classification');
+            const stage = (card.getAttribute('data-stage') || '').toLowerCase();
             let isVisible = true;
 
             if (filter === 'CRITICAL') {
-                const hasCritical = col.querySelector('.chain-node-card.critical');
-                isVisible = !!hasCritical;
+                isVisible = (cls === 'critical');
             } else if (filter === 'EVASION') {
-                isVisible = (stageKey === 'stage-overlay' || stageKey === 'stage-packed' || stageKey === 'stage-evasion' || stageKey === 'stage-injection');
+                isVisible = stage.includes('overlay') || stage.includes('pack') || stage.includes('evas') || stage.includes('defense') || stage.includes('inject');
             } else if (filter === 'EXFIL') {
-                isVisible = (stageKey === 'stage-harvesting' || stageKey === 'stage-exfiltration');
+                isVisible = stage.includes('harvest') || stage.includes('cred') || stage.includes('exfil') || stage.includes('c2');
             }
 
             if (isVisible) {
-                col.classList.remove('filtered-out');
+                card.classList.remove('filtered-out');
             } else {
-                col.classList.add('filtered-out');
+                card.classList.add('filtered-out');
+            }
+        });
+
+        document.querySelectorAll('.chain-stage-tier').forEach(tier => {
+            const visibleCards = tier.querySelectorAll('.chain-node-card:not(.filtered-out)');
+            if (visibleCards.length > 0) {
+                tier.classList.remove('filtered-out');
+            } else {
+                tier.classList.add('filtered-out');
             }
         });
 

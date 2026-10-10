@@ -175,9 +175,6 @@
                         <button class="tab-btn" data-tab="decompile" id="tab-decompile-btn">Decompiler &amp; RE (0)</button>
                         <button class="tab-btn" data-tab="attack-chain" id="tab-attackchain-btn">Attack chain (0)</button>
                     </div>
-                    <div id="quick-metrics-summary" style="font-size: 11px; color: var(--text-dim);">
-                        Direct2D/C++ Engine Offline Pass
-                    </div>
                 </div>
 
                 <div class="workbench-content">
@@ -218,6 +215,16 @@
                                     <span class="hash-label">SHA-1</span>
                                     <span class="hash-value" id="hash-sha1">Pending ingestion</span>
                                 </div>
+                            </div>
+                        </div>
+
+                        <div class="content-subcard" id="behavioral-explainer-subcard">
+                            <div class="subcard-header">
+                                <span>Executable behavioral breakdown and execution mechanism</span>
+                                <span class="tag-pill" id="behavioral-pill">Verified Static Forensics</span>
+                            </div>
+                            <div class="behavioral-explainer-body" id="behavioral-explainer-body">
+                                <div class="behavioral-placeholder">Select a preset profile or drop an executable to generate a concrete behavioral breakdown of how the binary operates.</div>
                             </div>
                         </div>
                     </div>
