@@ -46,9 +46,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (targetPane) targetPane.classList.add('active');
 
             if (targetTab === 'attack-chain') {
-                requestAnimationFrame(() => {
+                setTimeout(() => {
+                    fitAttackChainView();
                     updateAttackChainConnectors();
-                });
+                }, 40);
             }
         });
     });
@@ -1188,6 +1189,29 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        // Helper to normalize backend stage names/IDs to stage order keys
+        function mapNodeToStageKey(node) {
+            if (node.id && node.id.startsWith('stage-')) {
+                return node.id;
+            }
+            if (node.stage) {
+                const s = String(node.stage).toLowerCase();
+                if (s.includes('deliv') || s.includes('ingest')) return 'stage-delivery';
+                if (s.includes('overlay')) return 'stage-overlay';
+                if (s.includes('pack') || s.includes('decompress')) return 'stage-packed';
+                if (s.includes('stag')) return 'stage-overlay';
+                if (s.includes('evas') || s.includes('defense')) return 'stage-evasion';
+                if (s.includes('inject') || s.includes('privilege') || s.includes('escalat')) return 'stage-injection';
+                if (s.includes('harvest') || s.includes('cred') || s.includes('access')) return 'stage-harvesting';
+                if (s.includes('exfil') || s.includes('c2')) return 'stage-exfiltration';
+                if (s.includes('lib') || s.includes('benign')) return 'stage-library';
+                if (s.includes('exec') || s.includes('process')) return 'stage-execution';
+                if (s.startsWith('stage-')) return s;
+                return 'stage-' + s.replace(/[^a-z0-9]/g, '-');
+            }
+            return 'stage-execution';
+        }
+
         // Group nodes by stage
         const stageOrder = [
             { key: 'stage-delivery', title: '1. Ingestion' },
@@ -1203,9 +1227,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const stageMap = new Map();
         currentAttackNodes.forEach(node => {
-            const key = node.stage || 'stage-execution';
+            const key = mapNodeToStageKey(node);
             if (!stageMap.has(key)) stageMap.set(key, []);
             stageMap.get(key).push(node);
+        });
+
+        // Dynamically add any unknown stage categories to stageOrder
+        const knownKeys = new Set(stageOrder.map(s => s.key));
+        stageMap.forEach((nodes, key) => {
+            if (!knownKeys.has(key)) {
+                stageOrder.push({
+                    key: key,
+                    title: (nodes[0]?.stage || key).replace(/^stage-/, '')
+                });
+                knownKeys.add(key);
+            }
         });
 
         // Create column for each non-empty stage
@@ -1232,7 +1268,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 card.className = `chain-node-card ${badgeClass} ${node.id === activeNodeId ? 'active' : ''}`;
                 card.setAttribute('data-node-id', node.id);
                 card.setAttribute('data-classification', badgeClass);
-                card.setAttribute('data-stage', node.stage);
+                card.setAttribute('data-stage', node.stage || so.key);
 
                 const rvaHex = '0x' + (node.rva || 0).toString(16).toUpperCase();
                 const offHex = '0x' + (node.fileOffset || 0).toString(16).toUpperCase();
@@ -1278,15 +1314,16 @@ document.addEventListener('DOMContentLoaded', () => {
         applyStageFilter(currentStageFilter);
 
         // Schedule connector routing after DOM layout settles
-        requestAnimationFrame(() => {
+        setTimeout(() => {
             updateAttackChainConnectors();
+            fitAttackChainView();
             const firstCritical = currentAttackNodes.find(n => (n.classification || '').toLowerCase() === 'critical');
             if (firstCritical) {
                 selectAttackNode(firstCritical);
             } else if (currentAttackNodes.length > 0) {
                 selectAttackNode(currentAttackNodes[0]);
             }
-        });
+        }, 50);
     }
 
     // Select node and populate inspect proof drawer
@@ -1490,12 +1527,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (!currentAttackNodes || currentAttackNodes.length === 0) return;
 
+        const layerRect = graphNodesLayer.getBoundingClientRect();
+        if (layerRect.width === 0 || layerRect.height === 0) return;
+
         // Map node elements
         const cardMap = new Map();
         document.querySelectorAll('.chain-node-card').forEach(card => {
             const id = card.getAttribute('data-node-id');
             if (id) cardMap.set(id, card);
         });
+
+        const scale = graphScale || 1.0;
 
         currentAttackNodes.forEach(sourceNode => {
             const sourceCard = cardMap.get(sourceNode.id);
@@ -1507,13 +1549,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 const targetNode = currentAttackNodes.find(n => n.id === targetId);
                 if (!targetCard || targetCard.closest('.filtered-out') || !targetNode) return;
 
-                // Coordinates relative to layer
-                const sX = sourceCard.offsetLeft + sourceCard.offsetWidth;
-                const sY = sourceCard.offsetTop + (sourceCard.offsetHeight / 2);
-                const tX = targetCard.offsetLeft;
-                const tY = targetCard.offsetTop + (targetCard.offsetHeight / 2);
+                const sRect = sourceCard.getBoundingClientRect();
+                const tRect = targetCard.getBoundingClientRect();
 
-                const dx = Math.max(28, (tX - sX) * 0.45);
+                // Coordinates relative to layer regardless of column nesting
+                const sX = (sRect.right - layerRect.left) / scale;
+                const sY = (sRect.top + sRect.height / 2 - layerRect.top) / scale;
+                const tX = (tRect.left - layerRect.left) / scale;
+                const tY = (tRect.top + tRect.height / 2 - layerRect.top) / scale;
+
+                const dx = Math.max(30, (tX - sX) * 0.45);
                 const pathD = `M ${sX} ${sY} C ${sX + dx} ${sY}, ${tX - dx} ${tY}, ${tX} ${tY}`;
 
                 const targetCls = (targetNode.classification || 'pass').toLowerCase();
@@ -1614,20 +1659,33 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Mouse Wheel Zoom on Stage
+    // Mouse Wheel Scroll & Zoom on Stage
     if (graphStage) {
         graphStage.addEventListener('wheel', (e) => {
             e.preventDefault();
-            const rect = graphStage.getBoundingClientRect();
-            const mouseX = e.clientX - rect.left;
-            const mouseY = e.clientY - rect.top;
+            if (e.ctrlKey || e.metaKey) {
+                // Ctrl + Wheel: Zoom centered at mouse position
+                const rect = graphStage.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const mouseY = e.clientY - rect.top;
 
-            const zoomFactor = e.deltaY < 0 ? 1.12 : 0.89;
-            const newScale = Math.min(2.5, Math.max(0.35, graphScale * zoomFactor));
+                const zoomFactor = e.deltaY < 0 ? 1.12 : 0.89;
+                const newScale = Math.min(2.5, Math.max(0.35, graphScale * zoomFactor));
 
-            graphPanX = mouseX - (mouseX - graphPanX) * (newScale / graphScale);
-            graphPanY = mouseY - (mouseY - graphPanY) * (newScale / graphScale);
-            graphScale = newScale;
+                graphPanX = mouseX - (mouseX - graphPanX) * (newScale / graphScale);
+                graphPanY = mouseY - (mouseY - graphPanY) * (newScale / graphScale);
+                graphScale = newScale;
+            } else {
+                // Natural mouse wheel scrolling across the map
+                if (e.shiftKey) {
+                    graphPanX -= e.deltaY * 0.9;
+                } else {
+                    graphPanY -= e.deltaY * 0.9;
+                    if (e.deltaX) {
+                        graphPanX -= e.deltaX * 0.9;
+                    }
+                }
+            }
 
             updateGraphTransform();
         }, { passive: false });
