@@ -91,62 +91,132 @@ document.addEventListener('DOMContentLoaded', () => {
     btnOpenBinary.addEventListener('click', triggerOpenFile);
     dropZone.addEventListener('click', triggerOpenFile);
 
-    // 6. Robust HTML5 Drag and Drop Support
-    ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-        window.addEventListener(eventName, (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-        }, false);
-        document.addEventListener(eventName, (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-        }, false);
-    });
+    // 6. Robust Universal Drag and Drop Engine (Drag n Drop Anywhere in App)
+    let dragCounter = 0;
+    let lastHandledDrop = 0;
 
-    ['dragenter', 'dragover'].forEach(eventName => {
-        window.addEventListener(eventName, (e) => {
-            e.dataTransfer.dropEffect = 'copy';
-            dropZone.classList.add('drag-over');
-        }, false);
-    });
+    function handleDroppedBinary(filePath) {
+        if (!filePath) return;
+        const now = performance.now();
+        if (now - lastHandledDrop < 400) return; // Prevent double invocation from duplicate events
+        lastHandledDrop = now;
 
-    ['dragleave', 'dragend'].forEach(eventName => {
-        window.addEventListener(eventName, (e) => {
-            if (e.clientX <= 0 || e.clientY <= 0 || e.relatedTarget === null) {
-                dropZone.classList.remove('drag-over');
-            }
-        }, false);
-    });
-
-    window.addEventListener('drop', (e) => {
+        dragCounter = 0;
+        document.body.classList.remove('is-dragging-file');
         dropZone.classList.remove('drag-over');
 
-        const dt = e.dataTransfer;
-        if (dt && dt.files && dt.files.length > 0) {
-            const file = dt.files[0];
-            let filePath = '';
+        ghost.setMood('sniffing');
+        ghost.setDialogue('Target binary dropped! Commencing static PE ingestion, signature validation, and instruction sweeps.', false);
 
-            if (window.koltzi && typeof window.koltzi.getPathForFile === 'function') {
-                try {
-                    filePath = window.koltzi.getPathForFile(file);
-                } catch (err) {
-                    console.error('getPathForFile failed:', err);
+        // Automatically switch to telemetry log window so analyst sees every log line in real-time
+        const telTab = document.getElementById('tab-telemetry-btn');
+        if (telTab) telTab.click();
+
+        analyzeFile(filePath);
+    }
+
+    // Capture custom event dispatched by preload script
+    window.addEventListener('koltzi-file-dropped', (e) => {
+        if (e.detail && e.detail.filePath) {
+            handleDroppedBinary(e.detail.filePath);
+        }
+    });
+
+    // Window Drag Enter: Increment counter and show global drop state
+    window.addEventListener('dragenter', (e) => {
+        e.preventDefault();
+        dragCounter++;
+        document.body.classList.add('is-dragging-file');
+        dropZone.classList.add('drag-over');
+        if (ghost && typeof ghost.setMood === 'function') {
+            ghost.setMood('sniffing');
+            ghost.setDialogue('Target binary detected! Release anywhere to commence deep inspection.', false);
+        }
+    }, false);
+
+    // Window Drag Over: CRITICAL, must call preventDefault on dragover for drop to work
+    window.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        if (e.dataTransfer) {
+            e.dataTransfer.dropEffect = 'copy';
+        }
+    }, false);
+
+    // Window Drag Leave: Decrement counter, only remove overlay when leaving window
+    window.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        dragCounter--;
+        if (dragCounter <= 0) {
+            dragCounter = 0;
+            document.body.classList.remove('is-dragging-file');
+            dropZone.classList.remove('drag-over');
+        }
+    }, false);
+
+    // Window Drop: Extract dropped file path and trigger triage
+    window.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dragCounter = 0;
+        document.body.classList.remove('is-dragging-file');
+        dropZone.classList.remove('drag-over');
+
+        let filePath = '';
+        const dt = e.dataTransfer;
+
+        if (dt) {
+            if (dt.files && dt.files.length > 0) {
+                const file = dt.files[0];
+                if (window.koltzi && typeof window.koltzi.getPathForFile === 'function') {
+                    try {
+                        filePath = window.koltzi.getPathForFile(file);
+                    } catch (err) {
+                        console.warn('getPathForFile call failed:', err);
+                    }
+                }
+                if (!filePath && file.path) {
+                    filePath = file.path;
                 }
             }
-            if (!filePath && file.path) {
-                filePath = file.path;
-            }
 
-            if (filePath) {
-                // Automatically open telemetry log window on drop to show every action and path taken
-                const telTab = document.getElementById('tab-telemetry-btn');
-                if (telTab) telTab.click();
-                analyzeFile(filePath);
-            } else {
-                ghost.setMood('puzzled');
-                ghost.setDialogue('Could not resolve file path for dropped binary.', true);
+            if (!filePath && dt.items && dt.items.length > 0) {
+                for (let i = 0; i < dt.items.length; ++i) {
+                    const item = dt.items[i];
+                    if (item.kind === 'file') {
+                        const file = item.getAsFile();
+                        if (file) {
+                            if (window.koltzi && typeof window.koltzi.getPathForFile === 'function') {
+                                try {
+                                    filePath = window.koltzi.getPathForFile(file);
+                                } catch (err) {}
+                            }
+                            if (!filePath && file.path) {
+                                filePath = file.path;
+                            }
+                            if (filePath) break;
+                        }
+                    }
+                }
             }
         }
+
+        if (filePath) {
+            handleDroppedBinary(filePath);
+        } else {
+            ghost.setMood('puzzled');
+            ghost.setDialogue('Could not resolve file path for dropped binary.', true);
+        }
+    }, false);
+
+    // Redundant document dragover prevention
+    document.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        if (e.dataTransfer) {
+            e.dataTransfer.dropEffect = 'copy';
+        }
+    }, false);
+
+    document.addEventListener('drop', (e) => {
+        e.preventDefault();
     }, false);
 
     // 7. Theme Switching Engine

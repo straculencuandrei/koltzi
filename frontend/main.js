@@ -25,6 +25,11 @@ function createWindow() {
 
     mainWindow.loadFile(path.join(__dirname, 'index.html'));
 
+    // Prevent window navigation if a file is dropped
+    mainWindow.webContents.on('will-navigate', (event) => {
+        event.preventDefault();
+    });
+
     mainWindow.once('ready-to-show', () => {
         mainWindow.show();
     });
