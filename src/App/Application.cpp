@@ -103,6 +103,15 @@ static void LogPeIngestionSteps([[maybe_unused]] const PeReader& pe, TriageRepor
     }
     report.Log("IMPORT", "INFO", "Import Address Table resolved with " + std::to_string(report.imports.size()) + " modules and " + std::to_string(totalImports) + " imported symbols");
 
+    if (pe.HasOverlay()) {
+        double ratio = report.fileSize > 0 ? static_cast<double>(pe.GetOverlaySize()) / static_cast<double>(report.fileSize) : 0.0;
+        report.Log("OVERLAY", pe.GetOverlayEntropy() > 7.2 ? "WARN" : "INFO",
+            "PE Overlay detected at offset 0x" + std::format("{:X}", pe.GetOverlayOffset()) +
+            " (" + FormatFileSize(pe.GetOverlaySize()) + ", " + std::format("{:.1f}", ratio * 100.0) +
+            "% of file, Entropy " + std::format("{:.2f}", pe.GetOverlayEntropy()) +
+            "/8.00, Container: " + (pe.GetOverlayType().empty() ? "Appended Data" : pe.GetOverlayType()) + ")");
+    }
+
     if (!report.sha256.empty()) {
         report.Log("CRYPTO", "INFO", "Cryptographic fingerprint SHA-256=" + report.sha256 + " Imphash=" + (report.imphash.empty() ? "N/A" : report.imphash));
     }
@@ -154,6 +163,11 @@ void Application::TriageFileAsync(const std::wstring& filePath) {
             report->overallEntropy = pe.GetOverallEntropy();
             report->sections = pe.GetSections();
             report->imports = pe.GetImports();
+            report->overlayOffset = pe.GetOverlayOffset();
+            report->overlaySize = pe.GetOverlaySize();
+            report->overlayEntropy = pe.GetOverlayEntropy();
+            report->overlayRatio = report->fileSize > 0 ? static_cast<double>(report->overlaySize) / static_cast<double>(report->fileSize) : 0.0;
+            report->overlayType = pe.GetOverlayType();
 
             // Detect legitimate installer package signatures
             pe.DetectInstaller(*report);
@@ -226,6 +240,11 @@ void Application::TriageMemoryAsync(const uint8_t* data, size_t size, const std:
             report->overallEntropy = pe.GetOverallEntropy();
             report->sections = pe.GetSections();
             report->imports = pe.GetImports();
+            report->overlayOffset = pe.GetOverlayOffset();
+            report->overlaySize = pe.GetOverlaySize();
+            report->overlayEntropy = pe.GetOverlayEntropy();
+            report->overlayRatio = report->fileSize > 0 ? static_cast<double>(report->overlaySize) / static_cast<double>(report->fileSize) : 0.0;
+            report->overlayType = pe.GetOverlayType();
 
             pe.DetectInstaller(*report);
 
@@ -286,6 +305,11 @@ bool Application::TriageFileCli(const std::wstring& filePath) {
     report.overallEntropy = pe.GetOverallEntropy();
     report.sections = pe.GetSections();
     report.imports = pe.GetImports();
+    report.overlayOffset = pe.GetOverlayOffset();
+    report.overlaySize = pe.GetOverlaySize();
+    report.overlayEntropy = pe.GetOverlayEntropy();
+    report.overlayRatio = report.fileSize > 0 ? static_cast<double>(report.overlaySize) / static_cast<double>(report.fileSize) : 0.0;
+    report.overlayType = pe.GetOverlayType();
 
     pe.DetectInstaller(report);
 
@@ -307,6 +331,12 @@ bool Application::TriageFileCli(const std::wstring& filePath) {
     ss << "Subsystem:       " << report.subsystem << "\n";
     ss << "File Size:       " << FormatFileSize(report.fileSize) << "\n";
     ss << "Overall Entropy: " << std::fixed << std::setprecision(2) << report.overallEntropy << " / 8.00\n";
+    if (report.overlaySize > 0) {
+        ss << "PE Overlay:      " << FormatFileSize(report.overlaySize) << " ("
+           << std::fixed << std::setprecision(1) << (report.overlayRatio * 100.0) << "% of file, Entropy "
+           << std::setprecision(2) << report.overlayEntropy << " / 8.00, "
+           << (report.overlayType.empty() ? "Appended Data" : report.overlayType) << ")\n";
+    }
     ss << "Latency:         " << report.analysisTimeMs << " ms\n";
     ss << "Threat Score:    " << report.threatScore << " / 100\n";
     ss << "Threat Level:    " << (report.threatScore >= 60 ? "MALICIOUS" : report.threatScore >= 20 ? "SUSPICIOUS" : "CLEAN") << "\n";
@@ -394,6 +424,11 @@ bool Application::TriageFileJson(const std::wstring& filePath) {
     report.overallEntropy = pe.GetOverallEntropy();
     report.sections = pe.GetSections();
     report.imports = pe.GetImports();
+    report.overlayOffset = pe.GetOverlayOffset();
+    report.overlaySize = pe.GetOverlaySize();
+    report.overlayEntropy = pe.GetOverlayEntropy();
+    report.overlayRatio = report.fileSize > 0 ? static_cast<double>(report.overlaySize) / static_cast<double>(report.fileSize) : 0.0;
+    report.overlayType = pe.GetOverlayType();
 
     pe.DetectInstaller(report);
     CryptoVerifier::ComputeHashes(pe.GetBaseAddress(), pe.GetFileSize(), report.imports, report);
@@ -456,6 +491,11 @@ bool Application::TriageSampleJson(const std::string& sampleType) {
     report.overallEntropy = pe.GetOverallEntropy();
     report.sections = pe.GetSections();
     report.imports = pe.GetImports();
+    report.overlayOffset = pe.GetOverlayOffset();
+    report.overlaySize = pe.GetOverlaySize();
+    report.overlayEntropy = pe.GetOverlayEntropy();
+    report.overlayRatio = report.fileSize > 0 ? static_cast<double>(report.overlaySize) / static_cast<double>(report.fileSize) : 0.0;
+    report.overlayType = pe.GetOverlayType();
 
     pe.DetectInstaller(report);
     CryptoVerifier::ComputeHashes(pe.GetBaseAddress(), pe.GetFileSize(), report.imports, report);

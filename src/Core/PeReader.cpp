@@ -38,6 +38,10 @@ void PeReader::Close() {
     m_ntHeaders64 = nullptr;
     m_sectionHeaders = nullptr;
     m_numberOfSections = 0;
+    m_overlayOffset = 0;
+    m_overlaySize = 0;
+    m_overlayEntropy = 0.0;
+    m_overlayType.clear();
 }
 
 bool PeReader::OpenFile(const std::wstring& filePath) {
@@ -269,6 +273,46 @@ bool PeReader::ParseSections() {
         }
 
         m_sections.push_back(info);
+    }
+
+    // Compute Overlay (data past the end of the last PE section)
+    uint64_t maxSectionEnd = 0;
+    for (const auto& sec : m_sections) {
+        uint64_t secEnd = static_cast<uint64_t>(sec.rawOffset) + sec.rawSize;
+        if (secEnd > maxSectionEnd) {
+            maxSectionEnd = secEnd;
+        }
+    }
+    if (m_fileSize > maxSectionEnd && maxSectionEnd > 0) {
+        m_overlayOffset = maxSectionEnd;
+        m_overlaySize = m_fileSize - maxSectionEnd;
+        size_t sampleSize = std::min<size_t>(m_overlaySize, 4 * 1024 * 1024);
+        m_overlayEntropy = CalculateEntropy(m_baseAddress + m_overlayOffset, sampleSize);
+
+        if (m_overlaySize >= 16) {
+            const uint8_t* ov = m_baseAddress + m_overlayOffset;
+            if (ov[0] == 0x7A && ov[1] == 0xBC && ov[2] == 0xAF && ov[3] == 0x27 && ov[4] == 0x1C) {
+                m_overlayType = "7-Zip Compressed Archive";
+            } else if (ov[0] == 0x50 && ov[1] == 0x4B && ov[2] == 0x03 && ov[3] == 0x04) {
+                m_overlayType = "ZIP Compressed Archive";
+            } else if (ov[0] == 0x52 && ov[1] == 0x61 && ov[2] == 0x72 && ov[3] == 0x21) {
+                m_overlayType = "RAR Compressed Archive";
+            } else if (ov[0] == 0x4D && ov[1] == 0x5A) {
+                m_overlayType = "Embedded Executable (MZ)";
+            } else {
+                size_t checkHdr = std::min<size_t>(m_overlaySize, 512);
+                std::string ovHeader(reinterpret_cast<const char*>(ov), checkHdr);
+                if (ovHeader.find("NullsoftInst") != std::string::npos ||
+                    (ov[0] == 0x00 && ov[1] == 0x00 && ov[2] == 0x00 && ov[3] == 0x00 &&
+                     ov[4] == 0xEF && ov[5] == 0xBE && ov[6] == 0xAD && ov[7] == 0xDE)) {
+                    m_overlayType = "NSIS Solid-Compressed Payload Container";
+                } else if (ovHeader.find("Inno") != std::string::npos) {
+                    m_overlayType = "Inno Setup Compressed Data";
+                } else {
+                    m_overlayType = "Appended Payload Container";
+                }
+            }
+        }
     }
 
     return true;

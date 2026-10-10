@@ -171,17 +171,40 @@ void ThreatAssessor::Assess(const PeReader& pe, TriageReport& report) {
     }
 
     // ----------------------------------------------------
+    // PE Overlay Analysis and Unsigned Dropper Detection
+    // ----------------------------------------------------
+    bool hasSuspiciousOverlay = false;
+    if (report.overlaySize > 2 * 1024 * 1024 && report.overlayEntropy > 7.2) {
+        if (!report.signature.isValid && !report.signature.isTrustedVendor) {
+            hasSuspiciousOverlay = true;
+            report.hasSuspiciousOverlay = true;
+            score += 75;
+            redFlags.push_back(std::format("Unsigned payload dropper container: massive high-entropy overlay ({}, H={:.2f}, {:.1f}% of file) without valid digital signature",
+                FormatFileSize(report.overlaySize), report.overlayEntropy, report.overlayRatio * 100.0));
+            report.AddLog("ASSESS", "CRIT", std::format("+75 pts: Unsigned payload dropper overlay ({}, H={:.2f})",
+                FormatFileSize(report.overlaySize), report.overlayEntropy));
+        } else {
+            report.AddLog("ASSESS", "INFO", std::format("Installer archive overlay ({}, H={:.2f}) verified by digital signature",
+                FormatFileSize(report.overlaySize), report.overlayEntropy));
+        }
+    }
+
+    // ----------------------------------------------------
     // Legitimate Installer Package Verification
     // ----------------------------------------------------
     if (report.isInstaller) {
-        report.AddLog("ASSESS", "PASS", "Verified installer package (" + report.installerType + ") - routine software staging and file extraction");
-        if (!hasExfil && !hasInjection && !hasEvasionCommands) {
-            score = 0;
-            hasPackedCodeSection = false;
-            activePebAccesses = 0;
-            activeSyscalls = 0;
-            redFlags.clear();
-            yellowFlags.clear();
+        if (hasSuspiciousOverlay) {
+            report.AddLog("ASSESS", "WARN", "Installer package (" + report.installerType + ") carries an unsigned high-entropy overlay payload - potential Trojanized setup dropper");
+        } else {
+            report.AddLog("ASSESS", "PASS", "Verified installer package (" + report.installerType + ") - routine software staging and file extraction");
+            if (!hasExfil && !hasInjection && !hasEvasionCommands) {
+                score = 0;
+                hasPackedCodeSection = false;
+                activePebAccesses = 0;
+                activeSyscalls = 0;
+                redFlags.clear();
+                yellowFlags.clear();
+            }
         }
     }
 
@@ -244,7 +267,9 @@ void ThreatAssessor::Assess(const PeReader& pe, TriageReport& report) {
     // Mascot Forensic Dialogue Generation (Primary Verdict + Detailed Findings)
     // ----------------------------------------------------
     std::string primaryDialogue;
-    if (report.isInstaller && report.threatLevel == ThreatLevel::Clean) {
+    if (hasSuspiciousOverlay) {
+        primaryDialogue = "Dropper alert! This unsigned file contains a massive encrypted payload hidden in its PE overlay (" + FormatFileSize(report.overlaySize) + ")! It acts as an installer wrapper to drop unverified software!";
+    } else if (report.isInstaller && report.threatLevel == ThreatLevel::Clean) {
         primaryDialogue = "Safe setup package detected (" + report.installerType + ")! Clean file staging and valid application installation verified with zero malware indicators.";
     } else if (report.signature.isValid && report.threatLevel == ThreatLevel::Clean) {
         primaryDialogue = "Verified publisher! Digitally signed by " + report.signature.signerSubject + ". Standard imports and cryptographic routines verified with zero exfiltration indicators.";
@@ -358,6 +383,16 @@ void ThreatAssessor::Assess(const PeReader& pe, TriageReport& report) {
         );
     }
 
+    if (hasSuspiciousOverlay) {
+        report.dialogueLines.push_back(
+            "Unsigned payload dropper: " + FormatFileSize(report.overlaySize) + " payload container appended as PE overlay without a valid digital certificate."
+        );
+        report.dialogueLines.push_back(
+            std::format("Hidden payload telemetry: PE code stub is only {} while overlay is {} ({:.1f}% of file) with entropy {:.2f}/8.00.",
+                FormatFileSize(report.fileSize - report.overlaySize), FormatFileSize(report.overlaySize), report.overlayRatio * 100.0, report.overlayEntropy)
+        );
+    }
+
     report.dialogueLines.push_back(
         std::format("PE Structure: {} binary targeting {} with {} sections and {} import DLLs (Average entropy: {:.2f}/8.00).",
             report.machineType, report.subsystem, report.sections.size(), report.imports.size(), report.overallEntropy)
@@ -384,6 +419,17 @@ void ThreatAssessor::Assess(const PeReader& pe, TriageReport& report) {
         report.sections.size()
     ));
 
+    if (report.overlaySize > 0) {
+        report.technicalDetails.push_back(std::format(
+            "PE Overlay: {} at offset 0x{:X} ({:.1f}% of file, Entropy {:.2f} / 8.00, Type: {})",
+            FormatFileSize(report.overlaySize),
+            report.overlayOffset,
+            report.overlayRatio * 100.0,
+            report.overlayEntropy,
+            report.overlayType.empty() ? "Appended Data" : report.overlayType
+        ));
+    }
+
     if (!report.sha256.empty()) {
         report.technicalDetails.push_back("SHA-256: " + report.sha256);
     }
@@ -398,8 +444,10 @@ void ThreatAssessor::Assess(const PeReader& pe, TriageReport& report) {
         report.technicalDetails.push_back("Signature: Unsigned Binary");
     }
 
-    if (report.isInstaller) {
+    if (report.isInstaller && !hasSuspiciousOverlay) {
         report.technicalDetails.push_back("[INFO] Verified Setup Package: " + report.installerType + " (Clean software extraction & installation verified)");
+    } else if (report.isInstaller && hasSuspiciousOverlay) {
+        report.technicalDetails.push_back("[WARNING] Trojanized Setup Package: " + report.installerType + " (High-entropy appended payload container without digital signature)");
     }
 
     for (const auto& flag : redFlags) {

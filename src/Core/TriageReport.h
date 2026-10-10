@@ -164,6 +164,14 @@ struct TriageReport {
     bool isInstaller = false;
     std::string installerType;
 
+    // PE Overlay Analysis
+    uint64_t overlayOffset = 0;
+    uint64_t overlaySize = 0;
+    double overlayEntropy = 0.0;
+    double overlayRatio = 0.0;
+    std::string overlayType;
+    bool hasSuspiciousOverlay = false;
+
     std::vector<SectionInfo> sections;
     std::vector<ImportEntry> imports;
     std::vector<SyscallFinding> syscalls;
@@ -261,6 +269,12 @@ struct TriageReport {
         json += "  \"analysisTimeMs\": " + std::to_string(analysisTimeMs) + ",\n";
         json += "  \"isInstaller\": " + std::string(isInstaller ? "true" : "false") + ",\n";
         json += "  \"installerType\": \"" + EscapeJson(installerType) + "\",\n";
+        json += "  \"overlayOffset\": " + std::to_string(overlayOffset) + ",\n";
+        json += "  \"overlaySize\": " + std::to_string(overlaySize) + ",\n";
+        json += "  \"overlayEntropy\": " + std::to_string(overlayEntropy) + ",\n";
+        json += "  \"overlayRatio\": " + std::to_string(overlayRatio) + ",\n";
+        json += "  \"overlayType\": \"" + EscapeJson(overlayType) + "\",\n";
+        json += "  \"hasSuspiciousOverlay\": " + std::string(hasSuspiciousOverlay ? "true" : "false") + ",\n";
         json += "  \"isLegitimateBrowser\": " + std::string(isLegitimateBrowser ? "true" : "false") + ",\n";
         json += "  \"browserIdentity\": \"" + EscapeJson(browserIdentity) + "\",\n";
         json += "  \"md5\": \"" + EscapeJson(md5) + "\",\n";

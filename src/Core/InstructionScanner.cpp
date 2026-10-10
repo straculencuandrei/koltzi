@@ -1021,9 +1021,97 @@ void InstructionScanner::DecompileFunctions(
         candidateRoots.insert(static_cast<uint32_t>(ah.rva));
     }
 
+    // 6. Prologue Pattern Sweeper across all executable sections
+    // Discovers subroutines even in 32-bit x86 binaries (which lack .pdata) or stripped binaries
+    for (const auto& sec : pe.GetSections()) {
+        if (!sec.isExecutable) continue;
+        const uint8_t* codeBytes = nullptr;
+        size_t codeSize = 0;
+        if (!pe.GetSectionBytes(sec, codeBytes, codeSize) || codeSize < 4) continue;
+
+        for (size_t i = 0; i < codeSize - 3; ++i) {
+            bool isPrologue = false;
+            bool isPrecededByBoundary = (i == 0);
+            if (!isPrecededByBoundary && i > 0) {
+                uint8_t prev = codeBytes[i - 1];
+                if (prev == 0xCC || prev == 0x90 || prev == 0xC3 || prev == 0xC2) {
+                    isPrecededByBoundary = true;
+                }
+            }
+
+            if (pe.Is64Bit()) {
+                // x64 function prologues:
+                // sub rsp, imm8: 48 83 EC ??
+                if (codeBytes[i] == 0x48 && codeBytes[i + 1] == 0x83 && codeBytes[i + 2] == 0xEC) {
+                    isPrologue = true;
+                }
+                // sub rsp, imm32: 48 81 EC ?? ?? ?? ??
+                else if (i + 6 < codeSize && codeBytes[i] == 0x48 && codeBytes[i + 1] == 0x81 && codeBytes[i + 2] == 0xEC) {
+                    isPrologue = true;
+                }
+                // push rbp; mov rbp, rsp: 55 48 89 E5
+                else if (codeBytes[i] == 0x55 && codeBytes[i + 1] == 0x48 && codeBytes[i + 2] == 0x89 && codeBytes[i + 3] == 0xE5) {
+                    isPrologue = true;
+                }
+                // push rbx / push rbp: 40 53 / 40 55 preceded by boundary
+                else if (isPrecededByBoundary && (codeBytes[i] == 0x40 && (codeBytes[i + 1] == 0x53 || codeBytes[i + 1] == 0x55))) {
+                    isPrologue = true;
+                }
+                // mov [rsp+??], rbx/rcx/rdx: 48 89 5C 24 ?? preceded by boundary
+                else if (isPrecededByBoundary && codeBytes[i] == 0x48 && codeBytes[i + 1] == 0x89 &&
+                         (codeBytes[i + 2] == 0x5C || codeBytes[i + 2] == 0x4C) && codeBytes[i + 3] == 0x24) {
+                    isPrologue = true;
+                }
+            } else {
+                // 32-bit x86 function prologues:
+                // push ebp; mov ebp, esp: 55 8B EC
+                if (codeBytes[i] == 0x55 && codeBytes[i + 1] == 0x8B && codeBytes[i + 2] == 0xEC) {
+                    isPrologue = true;
+                }
+                // push ebp; mov ebp, esp (GCC): 55 89 E5
+                else if (codeBytes[i] == 0x55 && codeBytes[i + 1] == 0x89 && codeBytes[i + 2] == 0xE5) {
+                    isPrologue = true;
+                }
+                // mov edi, edi; push ebp; mov ebp, esp (Microsoft HotPatch): 8B FF 55 8B EC
+                else if (i + 4 < codeSize && codeBytes[i] == 0x8B && codeBytes[i + 1] == 0xFF &&
+                         codeBytes[i + 2] == 0x55 && codeBytes[i + 3] == 0x8B && codeBytes[i + 4] == 0xEC) {
+                    isPrologue = true;
+                }
+                // push ebp; sub esp, imm8: 55 83 EC ??
+                else if (codeBytes[i] == 0x55 && codeBytes[i + 1] == 0x83 && codeBytes[i + 2] == 0xEC) {
+                    isPrologue = true;
+                }
+                // push ebp; sub esp, imm32: 55 81 EC
+                else if (codeBytes[i] == 0x55 && codeBytes[i + 1] == 0x81 && codeBytes[i + 2] == 0xEC) {
+                    isPrologue = true;
+                }
+                // push ebp; push ebx; push esi; push edi: 55 53 56 57
+                else if (codeBytes[i] == 0x55 && codeBytes[i + 1] == 0x53 && codeBytes[i + 2] == 0x56 && codeBytes[i + 3] == 0x57) {
+                    isPrologue = true;
+                }
+                // push ebx; push esi; push edi: 53 56 57 preceded by boundary
+                else if (isPrecededByBoundary && codeBytes[i] == 0x53 && codeBytes[i + 1] == 0x56 && codeBytes[i + 2] == 0x57) {
+                    isPrologue = true;
+                }
+                // sub esp, imm8: 83 EC ?? preceded by boundary
+                else if (isPrecededByBoundary && codeBytes[i] == 0x83 && codeBytes[i + 1] == 0xEC) {
+                    isPrologue = true;
+                }
+                // sub esp, imm32: 81 EC ?? ?? ?? ?? preceded by boundary
+                else if (isPrecededByBoundary && codeBytes[i] == 0x81 && codeBytes[i + 1] == 0xEC) {
+                    isPrologue = true;
+                }
+            }
+
+            if (isPrologue) {
+                candidateRoots.insert(static_cast<uint32_t>(sec.virtualAddress + i));
+            }
+        }
+    }
+
     report.AddLog("DECOMP", "INFO", "Discovered " + std::to_string(candidateRoots.size()) + " candidate subroutine entry roots across executable sections");
 
-    // Order roots: Entry Point first, then findings/calls
+    // Order roots: Entry Point first, then findings/calls/prologues
     std::vector<uint32_t> prioritizedRoots;
     if (pe.GetEntryPointRva() != 0) {
         prioritizedRoots.push_back(pe.GetEntryPointRva());
@@ -1035,20 +1123,15 @@ void InstructionScanner::DecompileFunctions(
         }
     }
 
-    // Budget: decompile up to 45 functions to guarantee sub-millisecond execution on large binaries
-    constexpr size_t MAX_DECOMPILED_FUNCTIONS = 45;
+    // Budget: decompile up to 80 functions for thorough binary coverage
+    constexpr size_t MAX_DECOMPILED_FUNCTIONS = 80;
     size_t decompiledCount = 0;
 
     for (uint32_t fnRva : prioritizedRoots) {
         if (decompiledCount >= MAX_DECOMPILED_FUNCTIONS) break;
 
         bool isEntry = (fnRva == pe.GetEntryPointRva());
-        std::string fnName;
-        if (isEntry) {
-            fnName = "main_entry_0x" + std::format("{:X}", fnRva);
-        } else {
-            fnName = "sub_0x" + std::format("{:X}", fnRva);
-        }
+        std::string fnName = isEntry ? ("entrypoint_0x" + std::format("{:X}", fnRva)) : ("sub_0x" + std::format("{:X}", fnRva));
 
         DecompiledFunction df = ReconstructFunction(pe, fnRva, fnName, isEntry, iatSlotMap);
         if (!df.instructions.empty()) {
@@ -1174,14 +1257,14 @@ DecompiledFunction InstructionScanner::ReconstructFunction(
             comment = "Direct Syscall invocation (EDR hook bypass)";
             pseudoLine = "    __syscall(); // Direct kernel dispatch";
         } else if (instr.mnemonic == ZYDIS_MNEMONIC_RET) {
-            pseudoLine = "    return rax;";
+            pseudoLine = pe.Is64Bit() ? "    return rax;" : "    return eax;";
         } else if (instr.mnemonic == ZYDIS_MNEMONIC_JMP) {
             if (operands[0].type == ZYDIS_OPERAND_TYPE_IMMEDIATE) {
                 uint64_t tgtRva = curRva + instr.length + operands[0].imm.value.s;
                 comment = "-> 0x" + std::format("{:X}", tgtRva);
                 pseudoLine = "    goto loc_0x" + std::format("{:X}", tgtRva) + ";";
             } else {
-                pseudoLine = "    jmp " + ops + ";";
+                pseudoLine = "    goto (" + ops + ");";
             }
         } else if (instr.mnemonic == ZYDIS_MNEMONIC_JZ) {
             df.branchCount++;
@@ -1212,12 +1295,94 @@ DecompiledFunction InstructionScanner::ReconstructFunction(
                 }
             }
             if (pseudoLine.empty()) {
-                pseudoLine = "    " + ops + ";";
+                size_t commaPos = ops.find(',');
+                if (commaPos != std::string::npos) {
+                    std::string dst = ops.substr(0, commaPos);
+                    std::string src = ops.substr(commaPos + 1);
+                    while (!src.empty() && src.front() == ' ') src.erase(src.begin());
+                    while (!dst.empty() && dst.back() == ' ') dst.pop_back();
+                    pseudoLine = "    " + dst + " = " + src + ";";
+                } else {
+                    pseudoLine = "    mov " + ops + ";";
+                }
+            }
+        } else if (instr.mnemonic == ZYDIS_MNEMONIC_LEA) {
+            size_t commaPos = ops.find(',');
+            if (commaPos != std::string::npos) {
+                std::string dst = ops.substr(0, commaPos);
+                std::string src = ops.substr(commaPos + 1);
+                while (!src.empty() && src.front() == ' ') src.erase(src.begin());
+                while (!dst.empty() && dst.back() == ' ') dst.pop_back();
+                pseudoLine = "    " + dst + " = &(" + src + ");";
+            } else {
+                pseudoLine = "    lea " + ops + ";";
+            }
+        } else if (instr.mnemonic == ZYDIS_MNEMONIC_PUSH) {
+            pseudoLine = "    push(" + ops + ");";
+        } else if (instr.mnemonic == ZYDIS_MNEMONIC_POP) {
+            pseudoLine = "    " + ops + " = pop();";
+        } else if (instr.mnemonic == ZYDIS_MNEMONIC_ADD) {
+            size_t commaPos = ops.find(',');
+            if (commaPos != std::string::npos) {
+                std::string dst = ops.substr(0, commaPos);
+                std::string src = ops.substr(commaPos + 1);
+                while (!src.empty() && src.front() == ' ') src.erase(src.begin());
+                while (!dst.empty() && dst.back() == ' ') dst.pop_back();
+                pseudoLine = "    " + dst + " += " + src + ";";
+            }
+        } else if (instr.mnemonic == ZYDIS_MNEMONIC_SUB) {
+            size_t commaPos = ops.find(',');
+            if (commaPos != std::string::npos) {
+                std::string dst = ops.substr(0, commaPos);
+                std::string src = ops.substr(commaPos + 1);
+                while (!src.empty() && src.front() == ' ') src.erase(src.begin());
+                while (!dst.empty() && dst.back() == ' ') dst.pop_back();
+                pseudoLine = "    " + dst + " -= " + src + ";";
+            }
+        } else if (instr.mnemonic == ZYDIS_MNEMONIC_INC) {
+            pseudoLine = "    " + ops + "++;";
+        } else if (instr.mnemonic == ZYDIS_MNEMONIC_DEC) {
+            pseudoLine = "    " + ops + "--;";
+        } else if (instr.mnemonic == ZYDIS_MNEMONIC_AND) {
+            size_t commaPos = ops.find(',');
+            if (commaPos != std::string::npos) {
+                std::string dst = ops.substr(0, commaPos);
+                std::string src = ops.substr(commaPos + 1);
+                while (!src.empty() && src.front() == ' ') src.erase(src.begin());
+                while (!dst.empty() && dst.back() == ' ') dst.pop_back();
+                pseudoLine = "    " + dst + " &= " + src + ";";
+            }
+        } else if (instr.mnemonic == ZYDIS_MNEMONIC_OR) {
+            size_t commaPos = ops.find(',');
+            if (commaPos != std::string::npos) {
+                std::string dst = ops.substr(0, commaPos);
+                std::string src = ops.substr(commaPos + 1);
+                while (!src.empty() && src.front() == ' ') src.erase(src.begin());
+                while (!dst.empty() && dst.back() == ' ') dst.pop_back();
+                pseudoLine = "    " + dst + " |= " + src + ";";
             }
         } else if (instr.mnemonic == ZYDIS_MNEMONIC_XOR && instr.operand_count_visible >= 2 &&
                    operands[0].type == ZYDIS_OPERAND_TYPE_REGISTER && operands[1].type == ZYDIS_OPERAND_TYPE_REGISTER &&
                    operands[0].reg.value == operands[1].reg.value) {
             pseudoLine = "    " + fullDisasm.substr(sp + 1, fullDisasm.find(',') - sp - 1) + " = 0;";
+        } else if (instr.mnemonic == ZYDIS_MNEMONIC_CMP) {
+            size_t commaPos = ops.find(',');
+            if (commaPos != std::string::npos) {
+                std::string dst = ops.substr(0, commaPos);
+                std::string src = ops.substr(commaPos + 1);
+                while (!src.empty() && src.front() == ' ') src.erase(src.begin());
+                while (!dst.empty() && dst.back() == ' ') dst.pop_back();
+                pseudoLine = "    compare(" + dst + ", " + src + ");";
+            }
+        } else if (instr.mnemonic == ZYDIS_MNEMONIC_TEST) {
+            size_t commaPos = ops.find(',');
+            if (commaPos != std::string::npos) {
+                std::string dst = ops.substr(0, commaPos);
+                std::string src = ops.substr(commaPos + 1);
+                while (!src.empty() && src.front() == ' ') src.erase(src.begin());
+                while (!dst.empty() && dst.back() == ' ') dst.pop_back();
+                pseudoLine = "    test(" + dst + ", " + src + ");";
+            }
         } else {
             pseudoLine = "    " + fullDisasm + ";";
         }
@@ -1238,6 +1403,60 @@ DecompiledFunction InstructionScanner::ReconstructFunction(
     df.instructionCount = static_cast<uint32_t>(df.instructions.size());
     df.calledApis.assign(calledApisSet.begin(), calledApisSet.end());
 
+    // Determine semantic role from called APIs and characteristics
+    std::string semanticRole = "";
+    if (df.isEntryPoint) {
+        semanticRole = "entrypoint";
+    } else if (df.hasSyscall) {
+        semanticRole = "fn_SyscallStub";
+    } else if (df.hasPebAccess) {
+        semanticRole = "fn_PebWalker";
+    } else if (df.hasApiHash) {
+        semanticRole = "fn_ApiHasher";
+    } else {
+        for (const auto& api : df.calledApis) {
+            std::string lowerApi = api;
+            std::transform(lowerApi.begin(), lowerApi.end(), lowerApi.begin(), [](unsigned char c) { return (char)::tolower(c); });
+            if (lowerApi.find("regopen") != std::string::npos || lowerApi.find("regquery") != std::string::npos ||
+                lowerApi.find("regset") != std::string::npos || lowerApi.find("regcreate") != std::string::npos ||
+                lowerApi.find("regclose") != std::string::npos) {
+                semanticRole = "fn_RegistryConfig";
+                break;
+            } else if (lowerApi.find("createfile") != std::string::npos || lowerApi.find("writefile") != std::string::npos ||
+                       lowerApi.find("readfile") != std::string::npos || lowerApi.find("deletefile") != std::string::npos ||
+                       lowerApi.find("gettemppath") != std::string::npos || lowerApi.find("gettempfilename") != std::string::npos) {
+                semanticRole = "fn_FilePayloadIO";
+                break;
+            } else if (lowerApi.find("loadlibrary") != std::string::npos || lowerApi.find("getprocaddress") != std::string::npos ||
+                       lowerApi.find("ldrget") != std::string::npos) {
+                semanticRole = "fn_DynApiResolver";
+                break;
+            } else if (lowerApi.find("createwindow") != std::string::npos || lowerApi.find("dialogbox") != std::string::npos ||
+                       lowerApi.find("sendmessage") != std::string::npos || lowerApi.find("showwindow") != std::string::npos ||
+                       lowerApi.find("defwindowproc") != std::string::npos) {
+                semanticRole = "fn_UiInstaller";
+                break;
+            } else if (lowerApi.find("createprocess") != std::string::npos || lowerApi.find("shellexecute") != std::string::npos ||
+                       lowerApi.find("winexec") != std::string::npos || lowerApi.find("createthread") != std::string::npos) {
+                semanticRole = "fn_ProcExecution";
+                break;
+            } else if (lowerApi.find("virtualalloc") != std::string::npos || lowerApi.find("heapalloc") != std::string::npos ||
+                       lowerApi.find("globalalloc") != std::string::npos || lowerApi.find("virtualprotect") != std::string::npos) {
+                semanticRole = "fn_MemManager";
+                break;
+            } else if (lowerApi.find("internet") != std::string::npos || lowerApi.find("http") != std::string::npos ||
+                       lowerApi.find("socket") != std::string::npos || lowerApi.find("connect") != std::string::npos ||
+                       lowerApi.find("send") != std::string::npos || lowerApi.find("recv") != std::string::npos) {
+                semanticRole = "fn_NetworkC2";
+                break;
+            }
+        }
+    }
+    if (semanticRole.empty()) {
+        semanticRole = "sub";
+    }
+    df.name = semanticRole + "_0x" + std::format("{:X}", df.rva);
+
     // Generate C pseudocode representation
     df.pseudocodeLines.push_back("// ========================================================================");
     df.pseudocodeLines.push_back("// Subroutine: " + df.name + " [RVA 0x" + std::format("{:X}", df.rva) + "]");
@@ -1247,7 +1466,11 @@ DecompiledFunction InstructionScanner::ReconstructFunction(
     if (df.hasSyscall) df.pseudocodeLines.push_back("// Attribute: Direct Syscall Stub [CRITICAL]");
     if (df.hasPebAccess) df.pseudocodeLines.push_back("// Attribute: Dynamic PEB Dereference [WARNING]");
     df.pseudocodeLines.push_back("// ========================================================================");
-    df.pseudocodeLines.push_back("int64_t " + df.name + "(int64_t rcx, int64_t rdx, int64_t r8, int64_t r9) {");
+    if (pe.Is64Bit()) {
+        df.pseudocodeLines.push_back("int64_t " + df.name + "(int64_t rcx, int64_t rdx, int64_t r8, int64_t r9) {");
+    } else {
+        df.pseudocodeLines.push_back("int32_t __stdcall " + df.name + "(void) {");
+    }
 
     for (const auto& line : bodyPseudocode) {
         df.pseudocodeLines.push_back(line);

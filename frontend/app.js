@@ -240,8 +240,13 @@ document.addEventListener('DOMContentLoaded', () => {
         verdictBadge.className = 'verdict-badge';
         if (score >= 60) {
             verdictBadge.classList.add('threat');
-            verdictBadge.textContent = 'Critical threat';
-            verdictDesc.textContent = 'Malicious indicators detected. Direct syscalls or stealth injection loops identified.';
+            if (report.hasSuspiciousOverlay) {
+                verdictBadge.textContent = 'Critical threat / Dropper';
+                verdictDesc.textContent = 'Unsigned payload dropper container with massive encrypted overlay payload detected.';
+            } else {
+                verdictBadge.textContent = 'Critical threat';
+                verdictDesc.textContent = 'Malicious indicators detected. Direct syscalls or stealth injection loops identified.';
+            }
         } else if (score >= 20) {
             verdictBadge.classList.add('warn');
             verdictBadge.textContent = 'Suspicious';
@@ -299,6 +304,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const lat = report.analysisTimeMs ? report.analysisTimeMs.toFixed(1) : '0.8';
         document.getElementById('stat-latency').textContent = `${lat} ms (Air-gapped offline static pass)`;
+
+        // PE Overlay Telemetry
+        const statOverlay = document.getElementById('stat-overlay');
+        if (statOverlay) {
+            if (report.overlaySize && report.overlaySize > 0) {
+                const ovMb = (report.overlaySize / (1024 * 1024)).toFixed(1);
+                const ovPct = ((report.overlayRatio || 0) * 100).toFixed(1);
+                statOverlay.textContent = `${ovMb} MB (${ovPct}%, H=${(report.overlayEntropy || 0).toFixed(2)})`;
+                statOverlay.style.color = report.hasSuspiciousOverlay ? 'var(--status-threat)' : 'var(--accent-purple)';
+            } else {
+                statOverlay.textContent = 'None (Clean PE structure)';
+                statOverlay.style.color = 'var(--text-muted)';
+            }
+        }
 
         // Overview Tab: Findings List
         renderFindings(report);

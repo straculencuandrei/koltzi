@@ -52,6 +52,13 @@ public:
     // Detect legitimate installer runtimes (NSIS, Inno Setup, WiX, InstallShield, SFX)
     bool DetectInstaller(TriageReport& report) const;
 
+    // PE Overlay analysis
+    uint64_t GetOverlayOffset() const { return m_overlayOffset; }
+    uint64_t GetOverlaySize() const { return m_overlaySize; }
+    double GetOverlayEntropy() const { return m_overlayEntropy; }
+    bool HasOverlay() const { return m_overlaySize > 0; }
+    const std::string& GetOverlayType() const { return m_overlayType; }
+
     static double CalculateEntropy(const uint8_t* data, size_t length);
 
 private:
@@ -89,6 +96,11 @@ private:
     std::vector<ImportEntry> m_imports;
     std::vector<uint32_t> m_functionStarts;
     std::vector<uint32_t> m_exportRvas;
+
+    uint64_t m_overlayOffset = 0;
+    uint64_t m_overlaySize = 0;
+    double m_overlayEntropy = 0.0;
+    std::string m_overlayType;
 };
 
 } // namespace Koltzi

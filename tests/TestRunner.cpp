@@ -751,6 +751,11 @@ int main(int argc, char* argv[]) {
         r.overallEntropy = pe.GetOverallEntropy();
         r.sections = pe.GetSections();
         r.imports = pe.GetImports();
+        r.overlayOffset = pe.GetOverlayOffset();
+        r.overlaySize = pe.GetOverlaySize();
+        r.overlayEntropy = pe.GetOverlayEntropy();
+        r.overlayRatio = r.fileSize > 0 ? static_cast<double>(r.overlaySize) / static_cast<double>(r.fileSize) : 0.0;
+        r.overlayType = pe.GetOverlayType();
 
         pe.DetectInstaller(r);
 
@@ -771,6 +776,12 @@ int main(int argc, char* argv[]) {
         std::cout << "Subsystem:        " << r.subsystem << "\n";
         std::cout << "File Size:        " << FormatFileSize(r.fileSize) << "\n";
         std::cout << "File Entropy:     " << r.overallEntropy << " / 8.00\n";
+        if (r.overlaySize > 0) {
+            std::cout << "PE Overlay:       " << FormatFileSize(r.overlaySize) << " ("
+                      << std::fixed << std::setprecision(1) << (r.overlayRatio * 100.0) << "% of file, Entropy "
+                      << std::setprecision(2) << r.overlayEntropy << " / 8.00, "
+                      << (r.overlayType.empty() ? "Appended Data" : r.overlayType) << ")\n";
+        }
         std::cout << "Sections Count:   " << r.sections.size() << "\n";
         std::cout << "Imports Count:    " << r.imports.size() << " DLLs\n";
         std::cout << "Triage Latency:   " << ms << " ms (sub-100ms offline guarantee)\n";
@@ -802,6 +813,17 @@ int main(int argc, char* argv[]) {
         std::cout << "Technical Bullet Points:\n";
         for (const auto& item : r.technicalDetails) {
             std::cout << "  * " << item << "\n";
+        }
+        std::cout << "--------------------------------------------------------\n";
+        std::cout << "Decompiled Subroutines: " << r.decompiledFunctions.size() << " functions reconstructed\n";
+        for (size_t i = 0; i < std::min<size_t>(10, r.decompiledFunctions.size()); ++i) {
+            const auto& fn = r.decompiledFunctions[i];
+            std::cout << "  [" << i + 1 << "] " << fn.name << " (0x" << std::hex << fn.rva << std::dec << ", "
+                      << fn.instructionCount << " instrs, " << fn.size << " bytes";
+            if (!fn.calledApis.empty()) {
+                std::cout << ", invokes: " << fn.calledApis[0];
+            }
+            std::cout << ")\n";
         }
         std::cout << "========================================================\n";
         return 0;
