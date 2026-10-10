@@ -174,6 +174,7 @@
                         <button class="tab-btn" data-tab="telemetry" id="tab-telemetry-btn">Telemetry log (0)</button>
                         <button class="tab-btn" data-tab="decompile" id="tab-decompile-btn">Decompiler &amp; RE (0)</button>
                         <button class="tab-btn" data-tab="attack-chain" id="tab-attackchain-btn">Attack chain (0)</button>
+                        <button class="tab-btn" data-tab="wiki" id="tab-wiki-btn">RE Knowledge Base</button>
                     </div>
                 </div>
 
@@ -494,7 +495,292 @@
                             </aside>
                         </div>
                     </div>
-                </div>
+
+                    <!-- Tab 6: Reverse Engineering Knowledge Base / Wiki -->
+                    <div class="tab-pane" id="pane-wiki">
+                        <div class="wiki-container">
+                            <!-- Wiki Search & Filter Toolbar -->
+                            <div class="wiki-toolbar">
+                                <div class="wiki-toolbar-top">
+                                    <div class="wiki-title-group">
+                                        <div class="wiki-main-title">Reverse Engineering Primer and Concepts</div>
+                                        <div class="wiki-sub-title">Foundational mechanisms, heuristics, and binary structures for malware triage</div>
+                                    </div>
+                                    <div class="wiki-search-box">
+                                        <svg class="wiki-search-icon" viewBox="0 0 20 20" fill="none">
+                                            <circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="1.6"/>
+                                            <path d="M13 13l4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                                        </svg>
+                                        <input type="text" id="wiki-search-input" class="wiki-search-input" placeholder="Search concepts (e.g. entropy, PEB, syscalls, IAT, RWX, imphash)...">
+                                        <button class="wiki-clear-btn" id="wiki-search-clear" title="Clear filter">&times;</button>
+                                    </div>
+                                </div>
+                                <div class="wiki-cat-bar">
+                                    <button class="wiki-cat-btn active" data-cat="all">All Concepts (10)</button>
+                                    <button class="wiki-cat-btn" data-cat="entropy">Entropy and Packing</button>
+                                    <button class="wiki-cat-btn" data-cat="memory">Memory and PE Sections</button>
+                                    <button class="wiki-cat-btn" data-cat="evasion">Syscalls and Evasion</button>
+                                    <button class="wiki-cat-btn" data-cat="crypto">Crypto and Hashes</button>
+                                </div>
+                            </div>
+
+                            <!-- Wiki Concepts Grid -->
+                            <div class="wiki-cards-grid" id="wiki-cards-grid">
+                                <!-- Card 1: Shannon Entropy -->
+                                <article class="wiki-card" data-category="entropy">
+                                    <div class="wiki-card-header">
+                                        <div class="wiki-card-badge badge-accent">Core Triage Metric</div>
+                                        <h3 class="wiki-card-title">Shannon Entropy</h3>
+                                        <div class="wiki-card-subtitle">Measuring data unpredictability to spot packing and encryption</div>
+                                    </div>
+                                    <div class="wiki-card-body">
+                                        <p class="wiki-p">
+                                            Shannon entropy measures the uncertainty or randomness of byte values in a dataset, ranging from <strong>0.00</strong> (all bytes identical) to <strong>8.00</strong> (maximum possible uniform randomness).
+                                        </p>
+                                        <div class="wiki-entropy-scale">
+                                            <div class="wiki-scale-row">
+                                                <span class="scale-label">0.00 - 4.50</span>
+                                                <div class="scale-bar"><div class="scale-fill" style="width: 35%; background: var(--status-pass);"></div></div>
+                                                <span class="scale-desc">Plaintext strings, zero-padding, sparse lookup tables</span>
+                                            </div>
+                                            <div class="wiki-scale-row">
+                                                <span class="scale-label">4.50 - 6.80</span>
+                                                <div class="scale-bar"><div class="scale-fill" style="width: 70%; background: var(--status-pass);"></div></div>
+                                                <span class="scale-desc">Standard compiled x86/x64 instructions and resource data</span>
+                                            </div>
+                                            <div class="wiki-scale-row">
+                                                <span class="scale-label">6.80 - 7.20</span>
+                                                <div class="scale-bar"><div class="scale-fill" style="width: 85%; background: var(--status-warn);"></div></div>
+                                                <span class="scale-desc">Dense algorithms, multimedia assets, mild obfuscation</span>
+                                            </div>
+                                            <div class="wiki-scale-row">
+                                                <span class="scale-label">7.20 - 8.00</span>
+                                                <div class="scale-bar"><div class="scale-fill" style="width: 100%; background: var(--status-threat);"></div></div>
+                                                <span class="scale-desc">Encrypted payloads, shellcode stagers, packed executables (UPX)</span>
+                                            </div>
+                                        </div>
+                                        <div class="wiki-callout">
+                                            <div class="wiki-callout-title">Why it matters in Koltzi</div>
+                                            <p class="wiki-callout-text">
+                                                Malware authors compress or encrypt their malicious payload to evade static antivirus signatures. An executable section with entropy above 7.20 or an overlay above 7.80 almost certainly unpacks itself in memory at runtime before transferring execution to its payload.
+                                            </p>
+                                        </div>
+                                    </div>
+                                </article>
+
+                                <!-- Card 2: PE Sections and Layout -->
+                                <article class="wiki-card" data-category="memory">
+                                    <div class="wiki-card-header">
+                                        <div class="wiki-card-badge">Memory Layout</div>
+                                        <h3 class="wiki-card-title">PE Sections (.text, .rdata, .data)</h3>
+                                        <div class="wiki-card-subtitle">Virtual memory segments loaded by Windows into execution space</div>
+                                    </div>
+                                    <div class="wiki-card-body">
+                                        <p class="wiki-p">
+                                            A Portable Executable (PE) divides its content into distinct sections, each mapped with designated page permissions:
+                                        </p>
+                                        <ul class="wiki-list">
+                                            <li><strong>.text / CODE:</strong> Contains native CPU instructions. Typically marked Execute and Read (RX).</li>
+                                            <li><strong>.rdata:</strong> Read-only data including string literals, constant values, and the Import Address Table (IAT).</li>
+                                            <li><strong>.data:</strong> Global and static variables writable by the application at runtime (RW).</li>
+                                            <li><strong>.pdata:</strong> Structured exception handling unwind tables required for x64 stack unwinding.</li>
+                                            <li><strong>.rsrc:</strong> Application icons, manifests, dialog templates, and localized assets.</li>
+                                        </ul>
+                                        <div class="wiki-callout">
+                                            <div class="wiki-callout-title">Triage Takeaway</div>
+                                            <p class="wiki-callout-text">
+                                                Legitimate binaries follow standard section naming conventions. Non-standard section names (like .upx0, .themida, or randomized strings) or tiny raw sizes compared to large virtual sizes indicate code unpackers.
+                                            </p>
+                                        </div>
+                                    </div>
+                                </article>
+
+                                <!-- Card 3: W^X Memory Policy -->
+                                <article class="wiki-card" data-category="memory">
+                                    <div class="wiki-card-header">
+                                        <div class="wiki-card-badge badge-threat">Security Violation</div>
+                                        <h3 class="wiki-card-title">W^X Memory Policy (Write XOR Execute)</h3>
+                                        <div class="wiki-card-subtitle">Preventing code segments from modifying themselves at runtime</div>
+                                    </div>
+                                    <div class="wiki-card-body">
+                                        <p class="wiki-p">
+                                            The Write XOR Execute (W^X) principle mandates that memory pages can either be Writable OR Executable, never simultaneously. Modern operating systems enforce this through Data Execution Prevention (DEP).
+                                        </p>
+                                        <p class="wiki-p">
+                                            When a section or memory allocation is marked <strong>PAGE_EXECUTE_READWRITE (RWX)</strong>, code can dynamically overwrite its own instructions without re-protecting pages via VirtualProtect.
+                                        </p>
+                                        <div class="wiki-callout">
+                                            <div class="wiki-callout-title">Triage Takeaway</div>
+                                            <p class="wiki-callout-text">
+                                                Normal software almost never contains RWX sections. The presence of RWX sections or API calls requesting RWX protections is a primary indicator of shellcode decoders, in-memory stagers, and process injection techniques.
+                                            </p>
+                                        </div>
+                                    </div>
+                                </article>
+
+                                <!-- Card 4: Import Address Table (IAT) -->
+                                <article class="wiki-card" data-category="memory">
+                                    <div class="wiki-card-header">
+                                        <div class="wiki-card-badge">Loader Architecture</div>
+                                        <h3 class="wiki-card-title">Import Address Table (IAT)</h3>
+                                        <div class="wiki-card-subtitle">Dynamic function pointer resolution from shared system libraries</div>
+                                    </div>
+                                    <div class="wiki-card-body">
+                                        <p class="wiki-p">
+                                            When a program calls external Windows APIs (such as MessageBoxW or CreateFileW), it does not contain the function implementation. Instead, the PE header includes an Import Directory listing required DLLs and function names.
+                                        </p>
+                                        <p class="wiki-p">
+                                            At load time, the Windows PE loader resolves these symbols, loads the DLLs into the process virtual address space, and writes the actual memory addresses of each function into the IAT.
+                                        </p>
+                                        <div class="wiki-callout">
+                                            <div class="wiki-callout-title">Triage Takeaway</div>
+                                            <p class="wiki-callout-text">
+                                                Examining imported functions reveals binary capabilities. If a binary only imports LoadLibraryA and GetProcAddress, it resolves its real capabilities dynamically to evade static import inspection.
+                                            </p>
+                                        </div>
+                                    </div>
+                                </article>
+
+                                <!-- Card 5: Direct Syscalls & EDR Hooks -->
+                                <article class="wiki-card" data-category="evasion">
+                                    <div class="wiki-card-header">
+                                        <div class="wiki-card-badge badge-threat">Evasion Technique</div>
+                                        <h3 class="wiki-card-title">Direct Syscalls &amp; EDR Hook Bypasses</h3>
+                                        <div class="wiki-card-subtitle">Executing kernel transitions directly to blind security sensors</div>
+                                    </div>
+                                    <div class="wiki-card-body">
+                                        <p class="wiki-p">
+                                            Endpoint Detection and Response (EDR) agents monitor application behavior by installing inline hooks (jump instructions) into user-mode system libraries such as <code>ntdll.dll</code>. When an application calls <code>NtAllocateVirtualMemory</code>, the hook redirects execution to the EDR sensor for inspection.
+                                        </p>
+                                        <p class="wiki-p">
+                                            To bypass these user-mode sensors, advanced malware implements <strong>direct syscall stubs</strong>. Instead of calling through ntdll.dll, the malware loads the System Service Number (SSN) into register <code>EAX</code> and issues the CPU instruction <code>syscall</code> (opcode <code>0F 05</code>) directly from its own code section.
+                                        </p>
+                                        <div class="wiki-callout">
+                                            <div class="wiki-callout-title">Koltzi Detection Mechanism</div>
+                                            <p class="wiki-callout-text">
+                                                Koltzi uses the Zydis disassembler to scan executable sections for unhooked syscall stubs. Legitimate user-mode applications never embed raw syscall instructions outside of ntdll.dll.
+                                            </p>
+                                        </div>
+                                    </div>
+                                </article>
+
+                                <!-- Card 6: PEB (Process Environment Block) -->
+                                <article class="wiki-card" data-category="evasion">
+                                    <div class="wiki-card-header">
+                                        <div class="wiki-card-badge">OS Internals</div>
+                                        <h3 class="wiki-card-title">Process Environment Block (PEB) Traversal</h3>
+                                        <div class="wiki-card-subtitle">Reading process metadata without Win32 API calls</div>
+                                    </div>
+                                    <div class="wiki-card-body">
+                                        <p class="wiki-p">
+                                            The Process Environment Block (PEB) is a kernel-populated structure residing in user-mode memory containing process status, loaded DLL lists, environment variables, and debugger flags.
+                                        </p>
+                                        <p class="wiki-p">
+                                            On 64-bit Windows, the Thread Environment Block (TEB) is accessed via the <code>GS</code> segment register. The PEB pointer is located at offset <code>GS:[0x60]</code> (or <code>FS:[0x30]</code> on 32-bit systems).
+                                        </p>
+                                        <div class="wiki-callout">
+                                            <div class="wiki-callout-title">How Malware Exploits It</div>
+                                            <p class="wiki-callout-text">
+                                                Malware reads <code>PEB->Ldr->InMemoryOrderModuleList</code> to locate the base addresses of kernel32.dll and ntdll.dll manually without calling GetModuleHandle. Koltzi distinguishes normal CRT stack cookie initializations from evasive multi-step module traversals.
+                                            </p>
+                                        </div>
+                                    </div>
+                                </article>
+
+                                <!-- Card 7: API Hashing -->
+                                <article class="wiki-card" data-category="evasion">
+                                    <div class="wiki-card-header">
+                                        <div class="wiki-card-badge badge-threat">Obfuscation</div>
+                                        <h3 class="wiki-card-title">API Hashing (Dynamic Symbol Resolution)</h3>
+                                        <div class="wiki-card-subtitle">Hiding sensitive function names from static string sweepers</div>
+                                    </div>
+                                    <div class="wiki-card-body">
+                                        <p class="wiki-p">
+                                            Rather than storing plaintext API names like <code>VirtualAllocEx</code> or <code>WriteProcessMemory</code> in the binary, malware authors store 32-bit hash values calculated with algorithms like ROR13, DJB2, or CRC32.
+                                        </p>
+                                        <p class="wiki-p">
+                                            At runtime, the binary traverses the Export Directory of system modules, hashes each exported function name, and compares the result against its stored hash value to retrieve the function pointer.
+                                        </p>
+                                        <div class="wiki-callout">
+                                            <div class="wiki-callout-title">Koltzi Hash Sweeper</div>
+                                            <p class="wiki-callout-text">
+                                                Koltzi scans assembly immediate values against a pre-indexed database of over 100,000 Win32 API hashes across ROR13, DJB2, and MurmurHash, recovering the original API names automatically.
+                                            </p>
+                                        </div>
+                                    </div>
+                                </article>
+
+                                <!-- Card 8: PE Overlay -->
+                                <article class="wiki-card" data-category="entropy">
+                                    <div class="wiki-card-header">
+                                        <div class="wiki-card-badge">Container Forensics</div>
+                                        <h3 class="wiki-card-title">PE Overlay (Appended File Data)</h3>
+                                        <div class="wiki-card-subtitle">Bytes appended beyond the declared boundaries of the PE format</div>
+                                    </div>
+                                    <div class="wiki-card-body">
+                                        <p class="wiki-p">
+                                            A PE file specifies the exact raw file size of its last section in the Section Table. Any bytes appended to the file beyond this calculation constitute the <strong>overlay</strong>.
+                                        </p>
+                                        <p class="wiki-p">
+                                            The Windows PE loader ignores overlay bytes when mapping the file into virtual memory. However, the executing binary can open its own disk file (via CreateFileW) and read the overlay bytes directly.
+                                        </p>
+                                        <div class="wiki-callout">
+                                            <div class="wiki-callout-title">Common Uses</div>
+                                            <p class="wiki-callout-text">
+                                                Legitimate installers (Nullsoft NSIS, Inno Setup) store installer archive archives in the overlay. Malware droppers use the overlay to store encrypted secondary payloads, configuration scripts, and keylogger stagers.
+                                            </p>
+                                        </div>
+                                    </div>
+                                </article>
+
+                                <!-- Card 9: Imphash (Import Hash) -->
+                                <article class="wiki-card" data-category="crypto">
+                                    <div class="wiki-card-header">
+                                        <div class="wiki-card-badge">Threat Attribution</div>
+                                        <h3 class="wiki-card-title">Imphash (Import Hash)</h3>
+                                        <div class="wiki-card-subtitle">Standardized cryptographic fingerprint of dynamic import dependencies</div>
+                                    </div>
+                                    <div class="wiki-card-body">
+                                        <p class="wiki-p">
+                                            Devised by Mandiant, Imphash creates an MD5 hash of an executable binary's imported libraries and function names formatted in a normalized, lower-case sequence.
+                                        </p>
+                                        <p class="wiki-p">
+                                            Because compiler toolchains and threat frameworks generate consistent import sequences, different builds or packed variants created by the same author often share an identical imphash.
+                                        </p>
+                                        <div class="wiki-callout">
+                                            <div class="wiki-callout-title">Forensic Value</div>
+                                            <p class="wiki-callout-text">
+                                                Imphash allows security analysts to cluster related malware families and track adversary campaigns across different file hashes (MD5/SHA256).
+                                            </p>
+                                        </div>
+                                    </div>
+                                </article>
+
+                                <!-- Card 10: Authenticode Signatures -->
+                                <article class="wiki-card" data-category="crypto">
+                                    <div class="wiki-card-header">
+                                        <div class="wiki-card-badge">Code Integrity</div>
+                                        <h3 class="wiki-card-title">Authenticode Digital Signatures</h3>
+                                        <div class="wiki-card-subtitle">Cryptographic certificate verification for binary author authenticity</div>
+                                    </div>
+                                    <div class="wiki-card-body">
+                                        <p class="wiki-p">
+                                            Microsoft Authenticode uses Public Key Infrastructure (PKI) to embed digital signatures into PE files via the Security Directory (<code>IMAGE_DIRECTORY_ENTRY_SECURITY</code>).
+                                        </p>
+                                        <p class="wiki-p">
+                                            A valid signature proves that the file originated from a trusted publisher and that the binary code has not been tampered with or modified since it was signed.
+                                        </p>
+                                        <div class="wiki-callout">
+                                            <div class="wiki-callout-title">Triage Significance</div>
+                                            <p class="wiki-callout-text">
+                                                Signed binaries from trusted software vendors provide a high confidence baseline for legitimate utility software. Conversely, unsigned executables performing administrative or injection operations warrant immediate containment.
+                                            </p>
+                                        </div>
+                                    </div>
+                                </article>
+                            </div>
+                        </div>
+                    </div>
             </section>
         </main>
 
