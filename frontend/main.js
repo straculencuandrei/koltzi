@@ -3,6 +3,24 @@ const path = require('path');
 const { execFile } = require('child_process');
 const fs = require('fs');
 
+// Prevent disk cache access conflicts and redundant network/shader caches on Windows
+app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
+app.commandLine.appendSwitch('disable-http-cache');
+
+// Enforce single instance lock to prevent concurrent process cache collisions
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+    app.quit();
+    process.exit(0);
+}
+
+app.on('second-instance', () => {
+    if (mainWindow) {
+        if (mainWindow.isMinimized()) mainWindow.restore();
+        mainWindow.focus();
+    }
+});
+
 let mainWindow = null;
 
 const KOLTZI_EXE = path.join(__dirname, '..', 'build_rel', 'Koltzi.exe');
