@@ -774,55 +774,133 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderSections(report) {
         const heatmap = document.getElementById('sections-heatmap');
+        const legendGrid = document.getElementById('sections-legend-grid');
         const tbody = document.getElementById('sections-table-body');
-        heatmap.innerHTML = '';
-        tbody.innerHTML = '';
+        if (heatmap) heatmap.innerHTML = '';
+        if (legendGrid) legendGrid.innerHTML = '';
+        if (tbody) tbody.innerHTML = '';
 
         const sections = report.sections || [];
         if (sections.length === 0) {
-            heatmap.innerHTML = '<div class="section-slice" style="width: 100%; background: rgba(255,255,255,0.06);">No sections loaded</div>';
-            tbody.innerHTML = '<tr><td colspan="5" style="color: var(--text-dim); text-align: center; padding: 24px;">No sections loaded.</td></tr>';
+            if (heatmap) heatmap.innerHTML = '<div class="section-slice" style="width: 100%; background: rgba(255,255,255,0.06);">No sections loaded</div>';
+            if (legendGrid) legendGrid.innerHTML = '<span style="color: var(--text-dim); font-size: 11px;">No section records loaded.</span>';
+            if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="color: var(--text-dim); text-align: center; padding: 24px;">No sections loaded.</td></tr>';
             return;
         }
 
         let totalVirt = sections.reduce((sum, s) => sum + Math.max(1, s.virtualSize || 0), 0);
         if (totalVirt === 0) totalVirt = 1;
 
-        sections.forEach(s => {
-            const pct = Math.max(8, (s.virtualSize / totalVirt) * 100);
+        sections.forEach((s, idx) => {
+            const rawPct = (s.virtualSize / totalVirt) * 100;
+            const pct = Math.max(4, rawPct);
             const isPacked = (s.entropy || 0) > 7.2;
-            const isMedium = (s.entropy || 0) >= 6.0;
+            const isMedium = (s.entropy || 0) >= 6.0 && !isPacked;
 
             const sliceColor = isPacked ? 'var(--status-threat)' : isMedium ? 'var(--accent-cyan)' : 'var(--status-pass)';
+            const entropyClass = isPacked ? 'packed' : isMedium ? 'medium' : 'normal';
+
+            // 1. Heatmap Bar Slice
             const slice = document.createElement('div');
             slice.className = 'section-slice';
-            slice.style.width = `${pct}%`;
+            slice.style.flex = `${pct} 1 0%`;
             slice.style.backgroundColor = sliceColor;
-            slice.textContent = `${s.name} (${(s.entropy || 0).toFixed(1)})`;
-            slice.title = `${s.name}: Entropy ${(s.entropy || 0).toFixed(2)}, Size ${formatBytes(s.virtualSize)}`;
-            heatmap.appendChild(slice);
+            slice.setAttribute('data-section-index', idx);
+            slice.title = `${s.name}: Entropy ${(s.entropy || 0).toFixed(2)}/8.00 | Size ${formatBytes(s.virtualSize)} (${rawPct.toFixed(1)}%)`;
 
-            // Table Row
-            const tr = document.createElement('tr');
+            slice.innerHTML = `
+                <span class="slice-label">
+                    ${escapeHtml(s.name)}
+                    <span class="slice-ent">(${(s.entropy || 0).toFixed(1)})</span>
+                </span>
+            `;
+            if (heatmap) heatmap.appendChild(slice);
+
+            // 2. Interactive Section Legend Card
             let permVerdict = s.isExecutable ? 'Executable code [R-X]' : 'Data segment [R--]';
-            let permColor = 'var(--text-secondary)';
+            let permTag = s.isExecutable ? '[R-X]' : '[R--]';
+            let permClass = s.isExecutable ? 'code' : 'data';
 
             if (s.isRwx) {
                 permVerdict = '[CRIT] RWX executable and writable';
-                permColor = 'var(--status-threat)';
+                permTag = '[RWX]';
+                permClass = 'threat';
             } else if (s.isSuspiciousEntropy) {
                 permVerdict = report.isInstaller ? '[PASS] Compressed archive' : '[WARN] High entropy / packed';
-                permColor = report.isInstaller ? 'var(--accent-cyan)' : 'var(--status-warn)';
             }
 
-            tr.innerHTML = `
-                <td style="font-weight: 600; color: var(--text-primary);">${escapeHtml(s.name)}</td>
-                <td>0x${(s.virtualAddress || 0).toString(16).toUpperCase().padStart(8, '0')}</td>
-                <td>0x${(s.virtualSize || 0).toString(16).toUpperCase()} (${formatBytes(s.virtualSize)})</td>
-                <td style="color: ${sliceColor}; font-weight: 500;">${(s.entropy || 0).toFixed(2)}</td>
-                <td style="color: ${permColor};">${escapeHtml(permVerdict)}</td>
-            `;
-            tbody.appendChild(tr);
+            if (legendGrid) {
+                const card = document.createElement('div');
+                card.className = 'section-card';
+                card.setAttribute('data-section-index', idx);
+                card.innerHTML = `
+                    <div class="section-card-top">
+                        <div class="section-card-title-group">
+                            <span class="section-color-dot" style="background-color: ${sliceColor}"></span>
+                            <span class="section-name">${escapeHtml(s.name)}</span>
+                        </div>
+                        <span class="section-entropy-pill ${entropyClass}">${(s.entropy || 0).toFixed(2)}</span>
+                    </div>
+                    <div class="section-card-metrics">
+                        <span>${formatBytes(s.virtualSize)} (${rawPct.toFixed(1)}%)</span>
+                        <span class="section-perm-tag ${permClass}">${permTag}</span>
+                    </div>
+                    <div class="section-entropy-mini-track">
+                        <div class="section-entropy-mini-fill" style="width: ${Math.min(100, ((s.entropy || 0) / 8.0) * 100)}%; background-color: ${sliceColor}"></div>
+                    </div>
+                `;
+
+                // Interactive bidirectional hover between card, slice, and table row
+                card.addEventListener('mouseenter', () => {
+                    slice.classList.add('highlighted');
+                    card.classList.add('highlighted');
+                });
+                card.addEventListener('mouseleave', () => {
+                    slice.classList.remove('highlighted');
+                    card.classList.remove('highlighted');
+                });
+                card.addEventListener('click', () => {
+                    if (tbody && tbody.children[idx]) {
+                        const row = tbody.children[idx];
+                        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        row.classList.remove('flash-highlight');
+                        void row.offsetWidth;
+                        row.classList.add('flash-highlight');
+                    }
+                });
+
+                slice.addEventListener('mouseenter', () => {
+                    card.classList.add('highlighted');
+                    slice.classList.add('highlighted');
+                });
+                slice.addEventListener('mouseleave', () => {
+                    card.classList.remove('highlighted');
+                    slice.classList.remove('highlighted');
+                });
+                slice.addEventListener('click', () => {
+                    card.click();
+                });
+
+                legendGrid.appendChild(card);
+            }
+
+            // 3. Table Row
+            if (tbody) {
+                const tr = document.createElement('tr');
+                tr.setAttribute('data-section-index', idx);
+                let permColor = 'var(--text-secondary)';
+                if (s.isRwx) permColor = 'var(--status-threat)';
+                else if (s.isSuspiciousEntropy && !report.isInstaller) permColor = 'var(--status-warn)';
+
+                tr.innerHTML = `
+                    <td style="font-weight: 600; color: var(--text-primary);">${escapeHtml(s.name)}</td>
+                    <td>0x${(s.virtualAddress || 0).toString(16).toUpperCase().padStart(8, '0')}</td>
+                    <td>0x${(s.virtualSize || 0).toString(16).toUpperCase()} (${formatBytes(s.virtualSize)})</td>
+                    <td style="color: ${sliceColor}; font-weight: 500;">${(s.entropy || 0).toFixed(2)}</td>
+                    <td style="color: ${permColor};">${escapeHtml(permVerdict)}</td>
+                `;
+                tbody.appendChild(tr);
+            }
         });
     }
 
