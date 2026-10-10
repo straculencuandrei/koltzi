@@ -1,5 +1,8 @@
 #pragma once
 
+// Application Icon Resource
+#define IDI_APP_ICON           101
+
 // Embedded Creato Display font resources (RCDATA)
 #define IDR_FONT_THIN          201
 #define IDR_FONT_LIGHT         202

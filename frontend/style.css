@@ -298,11 +298,17 @@ body.is-dragging-file .titlebar * {
 }
 
 .brand-icon {
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: var(--accent-primary);
-    box-shadow: 0 0 10px rgba(245, 158, 11, 0.6);
+    width: 20px;
+    height: 20px;
+    object-fit: contain;
+    filter: drop-shadow(0 0 6px var(--accent-glow));
+    transition: transform 0.2s cubic-bezier(.34,1.56,.64,1), filter 0.2s ease;
+    user-select: none;
+    -webkit-user-drag: none;
+}
+
+.brand-icon:hover {
+    transform: scale(1.22) rotate(-8deg);
 }
 
 .brand-name {

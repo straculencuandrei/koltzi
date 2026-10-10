@@ -1,4 +1,5 @@
 #include "GhostWindow.h"
+#include "../../res/resource.h"
 #include <algorithm>
 #include <format>
 #include <cmath>
@@ -32,6 +33,8 @@ bool GhostWindow::Create() {
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hInstance;
     wc.lpszClassName = L"KoltziLiquidMorphismWindowClass";
+    wc.hIcon = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_APP_ICON));
+    wc.hIconSm = LoadIconW(hInstance, MAKEINTRESOURCEW(IDI_APP_ICON));
     wc.hCursor = LoadCursorW(nullptr, MAKEINTRESOURCEW(32512));
     wc.hbrBackground = (HBRUSH)GetStockObject(BLACK_BRUSH);
     wc.style = CS_HREDRAW | CS_VREDRAW;

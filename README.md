@@ -1,11 +1,20 @@
-# Koltzi
-> **Zero-Bloat Desktop Malware Triage Agent**  
-> *Sub-100ms PE Static Analysis with a Lightweight Direct2D Floating Mascot*
+<p align="center">
+  <img src="assets/ghost-icon.png" width="160" height="160" alt="Koltzi Ghost Companion Mascot" />
+</p>
 
-[![Standard](https://img.shields.io/badge/C%2B%2B-20-blue.svg)](https://en.cppreference.com/w/cpp/20)
-[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20x64-brightgreen.svg)]()
-[![Binary Size](https://img.shields.io/badge/Binary%20Size-1.05%20MB%20(Single%20EXE)-orange.svg)]()
-[![Telemetry](https://img.shields.io/badge/Telemetry-0%25%20(100%25%20Offline)-success.svg)]()
+<h1 align="center">Koltzi</h1>
+
+<p align="center">
+  <strong>Zero-Bloat Desktop Malware Triage Agent &amp; Ghost Companion</strong><br>
+  <em>Sub-100ms PE Static Analysis with Verified Forensics &amp; Interactive Knowledge Base</em>
+</p>
+
+<p align="center">
+  <a href="https://en.cppreference.com/w/cpp/20"><img src="https://img.shields.io/badge/C%2B%2B-20-blue.svg" alt="C++20" /></a>
+  <img src="https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20x64-brightgreen.svg" alt="Platform" />
+  <img src="https://img.shields.io/badge/Binary%20Size-1.05%20MB%20(Single%20EXE)-orange.svg" alt="Binary Size" />
+  <img src="https://img.shields.io/badge/Telemetry-0%25%20(100%25%20Offline)-success.svg" alt="Telemetry" />
+</p>
 
 ---
 
@@ -14,7 +23,7 @@ Koltzi is an offline Windows desktop utility designed for sub-100ms triage of un
 
 The application couples two layers:
 1. **Low-Level Analysis Core:** Bare-metal C++20, zero-copy memory-mapped file I/O (`CreateFileMappingW` / `MapViewOfFile`), linear instruction decoding via Zydis, and lookup-table Shannon entropy calculation.
-2. **User Interface:** A native hardware-accelerated desktop application window rendered via Direct2D/DirectWrite (`WS_OVERLAPPEDWINDOW` with minimize, maximize, and full-screen controls). Features an animated companion mascot and a comprehensive split-pane technical triage dashboard with no overlapping text.
+2. **User Interface:** A native hardware-accelerated desktop application window rendered via Direct2D/DirectWrite and Electron Liquid Glassmorphism (`WS_OVERLAPPEDWINDOW` with minimize, maximize, and full-screen controls). Features the animated Koltzi Ghost mascot, a 7-stage verifiable forensic execution graph, and an interactive Reverse Engineering Knowledge Base.
 
 * **Single Standalone Binary:** Portable executable under **1.1 MB** (static CRT `/MT`, zero external runtime dependencies).
 * **Memory Footprint:** Idle memory usage below **12 MB RAM**.
@@ -27,11 +36,24 @@ The application couples two layers:
 
 ```
 Koltzi/
+├── assets/                     # Ghost mascot icon assets (SVG, PNG, ICO)
+│   ├── ghost-icon.svg          # Vector mascot graphic
+│   ├── ghost-icon.png          # High-resolution raster icon (512x512)
+│   └── koltzi.ico              # Multi-resolution Windows application icon
 ├── CMakeLists.txt              # CMake configuration with static CRT (/MT), bcrypt, wintrust & Zydis
 ├── FONT/                       # Creato Display font family (Thin to Black, SIL OFL 1.1)
+├── frontend/                   # Liquid Morphism workbench UI & Ghost companion engine
+│   ├── index.html              # Workbench shell with 6 specialized tabs
+│   ├── style.css               # Glassmorphism design system & theme palettes
+│   ├── ghost.js                # Procedural ghost animation & mood state machine
+│   ├── app.js                  # Frontend triage renderer & attack chain graph
+│   ├── main.js                 # Electron desktop wrapper with native window controls
+│   ├── icon.svg                # Browser & titlebar vector icon
+│   └── icon.png                # Window frame icon
 ├── res/
-│   ├── resource.h              # Resource IDs for embedded Creato Display font weights
-│   └── Koltzi.rc               # RCDATA font resource script for single portable .exe
+│   ├── resource.h              # Resource IDs for application icon and embedded fonts
+│   ├── Koltzi.rc               # Windows resource script embedding koltzi.ico and fonts
+│   └── koltzi.ico              # Embedded executable icon resource
 ├── src/
 │   ├── Main.cpp                # WinMain entry point, Per-Monitor DPI V2 & COM initialization
 │   ├── Common.h                # System headers, string helpers, BCrypt/WinTrust headers & Direct2D macros
@@ -41,7 +63,7 @@ Koltzi/
 │   │   ├── CryptoVerifier.h/.cpp# Antivirus-grade MD5, SHA-1, SHA-256, Imphash, and Authenticode WinVerifyTrust
 │   │   ├── InstructionScanner  # Zydis linear sweeper with CRT TLS and crypto loop disambiguation
 │   │   ├── StringScanner.h/.cpp# Targeted artifact extractor with browser profile context suppression
-│   │   └── ThreatAssessor.h/.cpp# Correlated threat scoring, Authenticode trust discount & audit logging
+│   │   └── ThreatAssessor.h/.cpp# 7-stage attack chain synthesis, trust discount & audit logging
 │   ├── UI/
 │   │   ├── AnimationTypes.h    # State machine (IDLE, SNIFFING, ALARMED, PUZZLED, HAPPY) & particles
 │   │   ├── FontManager.h/.cpp  # Embedded/disk Creato Display typography manager & DirectWrite formats
@@ -51,7 +73,7 @@ Koltzi/
 │   └── App/
 │       ├── Application.h/.cpp  # Asynchronous worker thread (std::jthread) & sample generators
 └── tests/
-    └── TestRunner.cpp          # Automated test suite (8 tests) & command-line live file triage
+    └── TestRunner.cpp          # Automated test suite (14 tests) & command-line live file triage
 ```
 
 ---

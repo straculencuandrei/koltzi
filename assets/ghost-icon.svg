@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Ambient Aura Radial Gradient -->
+    <radialGradient id="auraGrad" cx="50%" cy="48%" r="48%">
+      <stop offset="0%" stop-color="#f59e0b" stop-opacity="0.32" />
+      <stop offset="55%" stop-color="#f59e0b" stop-opacity="0.12" />
+      <stop offset="100%" stop-color="#f59e0b" stop-opacity="0" />
+    </radialGradient>
+
+    <!-- Ghost Body Linear Gradient -->
+    <linearGradient id="ghostBodyGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.98" />
+      <stop offset="50%" stop-color="#f8fafc" stop-opacity="0.96" />
+      <stop offset="85%" stop-color="#e2e8f0" stop-opacity="0.92" />
+      <stop offset="100%" stop-color="#cbd5e1" stop-opacity="0.88" />
+    </linearGradient>
+
+    <!-- Arm Gradients -->
+    <linearGradient id="armLeftGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.98" />
+      <stop offset="100%" stop-color="#e2e8f0" stop-opacity="0.90" />
+    </linearGradient>
+    <linearGradient id="armRightGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.98" />
+      <stop offset="100%" stop-color="#e2e8f0" stop-opacity="0.90" />
+    </linearGradient>
+
+    <!-- Rosy Cheek Radial Gradient -->
+    <radialGradient id="blushGrad" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#f472b6" stop-opacity="0.75" />
+      <stop offset="65%" stop-color="#f472b6" stop-opacity="0.35" />
+      <stop offset="100%" stop-color="#f472b6" stop-opacity="0" />
+    </radialGradient>
+
+    <!-- Eye Gradient -->
+    <linearGradient id="eyeGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#090d16" />
+      <stop offset="100%" stop-color="#1e293b" />
+    </linearGradient>
+
+    <!-- Soft Drop Shadow Filter -->
+    <filter id="softGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="16" result="blur" />
+      <feComposite in="SourceGraphic" in2="blur" operator="over" />
+    </filter>
+    <filter id="bodyShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="14" flood-color="#000000" flood-opacity="0.25" />
+    </filter>
+  </defs>
+
+  <!-- Ambient Radiant Halo Layer -->
+  <circle cx="256" cy="250" r="230" fill="url(#auraGrad)" />
+
+  <!-- Floating Ambient Starlet Particles -->
+  <!-- Top Left Sparkle -->
+  <g transform="translate(100, 140) scale(0.9)" opacity="0.85">
+    <path d="M 0 -14 Q 0 0 14 0 Q 0 0 0 14 Q 0 0 -14 0 Q 0 0 0 -14 Z" fill="#fbbf24" />
+  </g>
+  <!-- Top Right Sparkle -->
+  <g transform="translate(410, 150) scale(1.1)" opacity="0.9">
+    <path d="M 0 -16 Q 0 0 16 0 Q 0 0 0 16 Q 0 0 -16 0 Q 0 0 0 -16 Z" fill="#f59e0b" />
+  </g>
+  <!-- Mid Left Orb -->
+  <circle cx="75" cy="275" r="5" fill="#fde68a" opacity="0.75" />
+  <!-- Mid Right Orb -->
+  <circle cx="435" cy="285" r="6" fill="#fde68a" opacity="0.8" />
+  <!-- Lower Left Sparkle -->
+  <g transform="translate(125, 395) scale(0.75)" opacity="0.75">
+    <path d="M 0 -12 Q 0 0 12 0 Q 0 0 0 12 Q 0 0 -12 0 Q 0 0 0 -12 Z" fill="#fbbf24" />
+  </g>
+  <!-- Lower Right Sparkle -->
+  <g transform="translate(385, 390) scale(0.85)" opacity="0.8">
+    <path d="M 0 -13 Q 0 0 13 0 Q 0 0 0 13 Q 0 0 -13 0 Q 0 0 0 -13 Z" fill="#f59e0b" />
+  </g>
+
+  <!-- Ghost Companion Main Figure -->
+  <g filter="url(#bodyShadow)">
+    <!-- Left Arm -->
+    <ellipse cx="106" cy="272" rx="20" ry="32" transform="rotate(-24 106 272)" fill="url(#armLeftGrad)" />
+
+    <!-- Right Arm (Raised in friendly greeting) -->
+    <ellipse cx="406" cy="252" rx="20" ry="32" transform="rotate(32 406 252)" fill="url(#armRightGrad)" />
+
+    <!-- Main Ghost Body (Smooth Dome Head + Rippling Waves) -->
+    <path d="
+      M 136 240
+      C 136 100, 376 100, 376 240
+      L 376 352
+      C 362 388, 338 388, 324 352
+      C 310 388, 286 388, 272 352
+      C 258 388, 234 388, 220 352
+      C 206 388, 182 388, 168 352
+      C 156 384, 136 376, 136 352
+      Z
+    " fill="url(#ghostBodyGrad)" />
+
+    <!-- Inner Specular Rim Highlight -->
+    <path d="M 172 210 C 172 135, 340 135, 340 210" fill="none" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round" opacity="0.55" />
+
+    <!-- Rosy Blushing Cheeks -->
+    <ellipse cx="196" cy="286" rx="22" ry="12" fill="url(#blushGrad)" />
+    <ellipse cx="316" cy="286" rx="22" ry="12" fill="url(#blushGrad)" />
+
+    <!-- Expressive Eyes -->
+    <!-- Left Eye -->
+    <g>
+      <ellipse cx="212" cy="246" rx="16" ry="22" fill="url(#eyeGrad)" />
+      <!-- Specular Highlight Primary -->
+      <circle cx="206" cy="238" r="6.5" fill="#ffffff" />
+      <!-- Specular Highlight Secondary -->
+      <circle cx="218" cy="254" r="3.2" fill="#ffffff" opacity="0.9" />
+    </g>
+
+    <!-- Right Eye -->
+    <g>
+      <ellipse cx="300" cy="246" rx="16" ry="22" fill="url(#eyeGrad)" />
+      <!-- Specular Highlight Primary -->
+      <circle cx="294" cy="238" r="6.5" fill="#ffffff" />
+      <!-- Specular Highlight Secondary -->
+      <circle cx="306" cy="254" r="3.2" fill="#ffffff" opacity="0.9" />
+    </g>
+
+    <!-- Smiling Mouth -->
+    <path d="M 244 274 Q 256 288 268 274" fill="none" stroke="#0f172a" stroke-width="4" stroke-linecap="round" />
+  </g>
+</svg>

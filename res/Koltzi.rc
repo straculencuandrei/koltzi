@@ -1,5 +1,8 @@
 #include "resource.h"
 
+// Application Executable Icon (Ghost Mascot)
+IDI_APP_ICON           ICON "koltzi.ico"
+
 // Creato Display (SIL Open Font License 1.1) - embedded so Koltzi.exe stays a single standalone binary
 IDR_FONT_THIN          RCDATA "../FONT/creato_display/CreatoDisplay-Thin.otf"
 IDR_FONT_LIGHT         RCDATA "../FONT/creato_display/CreatoDisplay-Light.otf"
